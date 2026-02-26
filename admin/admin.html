@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Admin Dashboard | Goa Eco-Guard</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+
+<body>
+
+  <header class="admin-header">
+    <h2>Goa Eco-Guard – Admin Panel</h2>
+    <button id="logoutBtn">Logout</button>
+  </header>
+
+  <nav class="admin-nav">
+    <button data-tab="reports" class="active">Reports</button>
+    <button data-tab="users">Users</button>
+    <button data-tab="missions">Missions</button>
+    <button data-tab="eco-spots">Eco Spots</button>
+    <button data-tab="stories">Stories</button>
+    <button data-tab="sightings">Sightings</button>
+  </nav>
+
+  <main>
+    <!-- REPORTS -->
+    <section id="reports" class="tab active">
+      <div class="section-header">
+        <h3>Reported Issues Management</h3>
+        <div class="filter-controls">
+          <label>
+            <input type="checkbox" id="showDeleted" onchange="loadReports()">
+            Show Soft Deleted
+          </label>
+        </div>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Location</th>
+            <th>Description</th>
+            <th>User</th>
+            <th>Status</th>
+            <th>Image</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="reportsTable"></tbody>
+      </table>
+    </section>
+
+    <!-- USERS -->
+    <section id="users" class="tab">
+      <div class="section-header">
+        <h3>Registered Users</h3>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Phone</th>
+            <th>Password (Hashed)</th>
+            <th>Role</th>
+            <th>Registered</th>
+          </tr>
+        </thead>
+        <tbody id="usersTable"></tbody>
+      </table>
+    </section>
+
+    <!-- MISSIONS -->
+    <section id="missions" class="tab">
+      <div class="section-header">
+        <h3>Missions Management</h3>
+        <button class="btn btn-primary" id="addMissionBtn">+ Add Mission</button>
+      </div>
+      <div id="missionsList"></div>
+    </section>
+
+    <!-- ECO SPOTS -->
+    <section id="eco-spots" class="tab">
+      <div class="section-header">
+        <h3>Eco Spots Management</h3>
+        <button class="btn btn-primary" id="addEcoSpotBtn">+ Add Eco Spot</button>
+      </div>
+      <div id="ecoSpotsList"></div>
+    </section>
+
+    <!-- STORIES -->
+    <section id="stories" class="tab">
+      <div class="section-header">
+        <h3>Eco Stories Management</h3>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>User</th>
+            <th>Likes</th>
+            <th>Before</th>
+            <th>After</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="storiesTable"></tbody>
+      </table>
+    </section>
+
+    <!-- SIGHTINGS -->
+    <section id="sightings" class="tab">
+      <div class="section-header">
+        <h3>Wildlife Sightings Management</h3>
+      </div>
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Species</th>
+            <th>User</th>
+            <th>Location</th>
+            <th>Image</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="sightingsTable"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <!-- Mission Modal -->
+  <div class="modal" id="missionModal">
+    <div class="modal-content">
+      <span class="close-modal">&times;</span>
+      <h3 id="missionModalTitle">Add Mission</h3>
+      <form id="missionForm">
+        <input type="text" id="missionTitle" placeholder="Title" required>
+        <textarea id="missionDesc" placeholder="Description" required></textarea>
+        <input type="date" id="missionDate" required>
+        <input type="text" id="missionLocation" placeholder="Location" required>
+        <input type="file" id="missionImage" accept="image/*">
+        <button type="submit" class="btn btn-primary">Save Mission</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Mission Participants Modal -->
+  <div class="modal" id="participantsModal">
+    <div class="modal-content wide">
+      <span class="close-modal">&times;</span>
+      <h3>Mission Participants</h3>
+      <div id="participantsList"></div>
+    </div>
+  </div>
+
+  <!-- Eco Spot Modal -->
+  <div class="modal" id="ecoSpotModal">
+    <div class="modal-content large">
+      <span class="close-modal">&times;</span>
+      <h3 id="ecoSpotModalTitle">Add Eco Spot</h3>
+      <form id="ecoSpotForm">
+        <div class="form-row">
+          <input type="text" id="ecoSpotName" placeholder="Name (e.g., Eco-Luxury Beach Resort)" required>
+          <input type="number" id="ecoSpotRating" placeholder="Rating (e.g., 4.8)" step="0.1" min="0" max="5" required>
+        </div>
+        <input type="text" id="ecoSpotLocation" placeholder="Location (e.g., Agonda Beach)" required>
+        <textarea id="ecoSpotDescription" placeholder="Description" required></textarea>
+        <div class="form-row">
+          <input type="text" id="ecoSpotCategory" placeholder="Category (Hotel/Restaurant/Place)" required>
+          <input type="text" id="ecoSpotPrice" placeholder="Price (e.g., From ₹8,000/night)">
+        </div>
+        <div class="form-group">
+          <label>Sustainability Features (comma separated):</label>
+          <input type="text" id="ecoSpotFeatures" placeholder="Solar Energy, Organic Gardens, Zero Waste">
+        </div>
+        <div class="form-group">
+          <label>Additional Details:</label>
+          <textarea id="ecoSpotDetails" placeholder="100% renewable energy, Local sourcing, etc."></textarea>
+        </div>
+        <input type="file" id="ecoSpotImage" accept="image/*">
+        <button type="submit" class="btn btn-primary">Save Eco Spot</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="admin.js"></script>
+</body>
+
+</html>
+
