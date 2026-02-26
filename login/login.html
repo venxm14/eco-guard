@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Goa Eco-Guard</title>
+    <meta name="description" content="Login to your Goa Eco-Guard account to continue protecting Goa's environment.">
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,400;1,600&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../styles.css">
+    <link rel="stylesheet" href="auth.css">
+</head>
+
+<body class="auth-page">
+    <div class="auth-grid-texture"></div>
+    <div id="leafContainer"></div>
+
+    <div class="auth-container">
+
+        <!-- Top Bar -->
+        <div class="auth-header">
+            <a href="../index.html" class="back-home" onclick="sessionStorage.setItem('fromLoader','1')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Back to Home
+            </a>
+            <div class="auth-logo">
+                <button id="themeToggle" class="btn btn-outline btn-sm" style="margin-right: 15px; border: 1px solid rgba(255,255,255,0.1); color: white; background: transparent; padding: 4px 10px; border-radius: 6px; cursor: pointer;">🌙 Dark</button>
+                <div class="auth-logo-icon">🌿</div>
+                <span>Goa Eco-Guard</span>
+            </div>
+        </div>
+
+        <!-- Card -->
+        <div class="auth-card">
+
+            <!-- FORM SIDE -->
+            <div class="auth-content">
+                <div class="auth-eyebrow">Welcome Back</div>
+                <h1>Sign in to your<br><em>account</em></h1>
+                <p class="auth-subtitle">Continue protecting Goa's beaches, rivers and forests</p>
+
+                <form id="loginForm" class="auth-form">
+                    <div class="form-group">
+                        <label for="loginEmail">Email Address</label>
+                        <div class="input-wrap">
+                            <span class="input-ico">✉️</span>
+                            <input type="email" id="loginEmail" name="email"
+                                   placeholder="you@example.com" required autocomplete="email">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="loginPassword">Password</label>
+                        <div class="input-wrap">
+                            <span class="input-ico">🔒</span>
+                            <input type="password" id="loginPassword" name="password"
+                                   placeholder="Enter your password" required
+                                   autocomplete="current-password" style="padding-right:44px;">
+                            <span id="togglePassword" style="position:absolute;right:13px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:15px;opacity:0.4;transition:opacity 0.2s;user-select:none;">👁</span>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-full" id="loginSubmit">Sign In →</button>
+                </form>
+
+                <p class="text-center mt-2">
+                    Don't have an account? <a href="signup.html" class="text-link">Create one free</a>
+                </p>
+            </div>
+
+            <!-- IMAGE SIDE -->
+            <div class="auth-image">
+                <img src="https://images.unsplash.com/photo-1542601906990-b4d3fb778b09?w=800&h=900&fit=crop&auto=format" alt="Goa Beach Cleanup">
+                <div class="image-overlay"></div>
+
+                <div class="image-eco-stats">
+                    <div class="ie-stat"><div class="ie-stat-num" id="warriorCount">10K+</div><div class="ie-stat-lbl">Warriors</div></div>
+                    <div class="ie-stat"><div class="ie-stat-num" id="reportCount">2.4K</div><div class="ie-stat-lbl">Reports</div></div>
+                    <div class="ie-stat"><div class="ie-stat-num" id="missionCount">87</div><div class="ie-stat-lbl">Missions</div></div>
+                </div>
+
+                <div class="image-overlay-content">
+                    <h3>Join <span id="heroWarriorCount">10,000</span>+<br>Eco Warriors</h3>
+                    <p>Together, we're making Goa cleaner and greener every single day</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- FOOTER -->
+    <footer class="auth-page-footer">
+        <div class="auth-page-footer-inner">
+            <span class="footer-copy">© 2025 Goa Eco-Guard. All rights reserved.</span>
+            <div class="footer-links">
+                <a href="#">Privacy Policy</a>
+                <a href="#">Terms of Service</a>
+                <a href="#">Help Center</a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="auth.js"></script>
+    <script>
+        /* Leaf particles */
+        const lc = document.getElementById('leafContainer');
+        for (let i = 0; i < 18; i++) {
+            const l = document.createElement('div');
+            l.className = 'leaf-particle';
+            l.style.cssText = `left:${Math.random()*75}%;animation-duration:${10+Math.random()*16}s;animation-delay:${Math.random()*16}s;opacity:${0.12+Math.random()*0.25};transform:scale(${0.6+Math.random()*0.9})`;
+            lc.appendChild(l);
+        }
+
+        /* Password toggle */
+        document.getElementById('togglePassword').addEventListener('click', function () {
+            const inp = document.getElementById('loginPassword');
+            const isPass = inp.type === 'password';
+            inp.type = isPass ? 'text' : 'password';
+            this.textContent = isPass ? '🙈' : '👁';
+        });
+    </script>
+</body>
+</html>

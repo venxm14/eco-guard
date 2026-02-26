@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Goa Eco-Guard – Loading</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #041a0d 0%, #0a2a1a 30%, #0d3d24 60%, #072b19 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        /* ── Floating particles ── */
+        .particles {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            overflow: hidden;
+        }
+        .particle {
+            position: absolute;
+            border-radius: 50%;
+            background: rgba(74, 222, 128, 0.15);
+            animation: floatUp linear infinite;
+        }
+        @keyframes floatUp {
+            0%   { transform: translateY(110vh) scale(0); opacity: 0; }
+            10%  { opacity: 1; }
+            90%  { opacity: 0.6; }
+            100% { transform: translateY(-10vh) scale(1); opacity: 0; }
+        }
+
+        /* ── Centre content ── */
+        .loader-wrap {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 10;
+        }
+
+        /* Ripple rings */
+        .rings {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 220px;
+            height: 220px;
+            transform: translate(-50%, -55%);
+            pointer-events: none;
+        }
+        .ring {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 1.5px solid rgba(74, 222, 128, 0.22);
+            animation: ripple 3s ease-out infinite;
+        }
+        .ring:nth-child(1) { animation-delay: 0s; }
+        .ring:nth-child(2) { animation-delay: 0.9s; }
+        .ring:nth-child(3) { animation-delay: 1.8s; }
+        @keyframes ripple {
+            0%   { transform: scale(0.5); opacity: 0.9; }
+            100% { transform: scale(2.6); opacity: 0; }
+        }
+
+        /* Logo circle */
+        .logo-wrap {
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.05);
+            border: 2px solid rgba(74, 222, 128, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 28px;
+            animation: pulseShadow 2.2s ease-in-out infinite, fadeScaleIn 0.9s ease forwards;
+            box-shadow:
+                0 0 0 0 rgba(74, 222, 128, 0.4),
+                0 0 60px rgba(74, 222, 128, 0.15),
+                inset 0 0 30px rgba(74, 222, 128, 0.05);
+        }
+        @keyframes fadeScaleIn {
+            from { opacity: 0; transform: scale(0.65); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+        @keyframes pulseShadow {
+            0%, 100% {
+                box-shadow:
+                    0 0 0 0 rgba(74,222,128,0.4),
+                    0 0 50px rgba(74,222,128,0.12);
+            }
+            50% {
+                box-shadow:
+                    0 0 0 14px rgba(74,222,128,0),
+                    0 0 90px rgba(74,222,128,0.3);
+            }
+        }
+
+        .logo-img {
+            width: 84px;
+            height: 84px;
+            border-radius: 50%;
+            object-fit: contain;
+            filter: drop-shadow(0 0 14px rgba(74, 222, 128, 0.55));
+            animation: logoSpin 0s linear; /* no spin, just glow */
+        }
+
+        /* Brand name */
+        .brand {
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: 0.03em;
+            background: linear-gradient(135deg, #6ee7a0, #4ade80, #22c55e, #86efac);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            animation: slideUp 0.7s 0.25s ease both;
+            margin-bottom: 6px;
+        }
+
+        .tagline {
+            font-size: 0.82rem;
+            font-weight: 500;
+            color: rgba(255,255,255,0.4);
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            animation: slideUp 0.7s 0.45s ease both;
+            margin-bottom: 40px;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(18px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Progress bar */
+        .bar-track {
+            width: 220px;
+            height: 3px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            overflow: hidden;
+            animation: slideUp 0.7s 0.6s ease both;
+            margin-bottom: 12px;
+        }
+        .bar-fill {
+            height: 100%;
+            width: 0%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #22c55e, #4ade80, #86efac);
+            box-shadow: 0 0 10px #4ade80, 0 0 20px rgba(74,222,128,0.3);
+            transition: width 0.25s ease;
+        }
+
+        /* Percentage text */
+        .pct {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: rgba(74,222,128,0.7);
+            letter-spacing: 0.06em;
+            animation: slideUp 0.7s 0.7s ease both;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Page‑out fade */
+        body.fade-out {
+            animation: pageOut 0.65s ease forwards;
+        }
+        @keyframes pageOut {
+            to { opacity: 0; transform: scale(1.04); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Floating particles -->
+    <div class="particles" id="particles"></div>
+
+    <!-- Main loader -->
+    <div class="loader-wrap">
+        <!-- ripple rings sit behind the logo -->
+        <div class="rings">
+            <span class="ring"></span>
+            <span class="ring"></span>
+            <span class="ring"></span>
+        </div>
+
+        <!-- Logo -->
+        <div class="logo-wrap">
+            <img src="logo.png" alt="Goa Eco-Guard Logo" class="logo-img">
+        </div>
+
+        <!-- Brand text -->
+        <div class="brand">Goa Eco-Guard</div>
+        <div class="tagline">Saving Paradise Together</div>
+
+        <!-- Progress -->
+        <div class="bar-track">
+            <div class="bar-fill" id="barFill"></div>
+        </div>
+        <div class="pct" id="pctText">0%</div>
+    </div>
+
+    <script>
+        /* ── Particles ── */
+        (function spawnParticles() {
+            var container = document.getElementById('particles');
+            var count = 22;
+            for (var i = 0; i < count; i++) {
+                var el = document.createElement('div');
+                el.className = 'particle';
+                var size = Math.random() * 6 + 3;
+                el.style.cssText = [
+                    'width:'  + size + 'px',
+                    'height:' + size + 'px',
+                    'left:'   + (Math.random() * 100) + '%',
+                    'animation-duration:' + (Math.random() * 10 + 8) + 's',
+                    'animation-delay:'    + (Math.random() * -15) + 's'
+                ].join(';');
+                container.appendChild(el);
+            }
+        })();
+
+        /* ── Progress bar & redirect ── */
+        var bar     = document.getElementById('barFill');
+        var pctText = document.getElementById('pctText');
+        var pct     = 0;
+        var duration = 2800; // ms before redirect
+        var startTime = null;
+
+        function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+        function tick(now) {
+            if (!startTime) startTime = now;
+            var elapsed  = now - startTime;
+            var progress = Math.min(elapsed / duration, 1);
+            pct = Math.round(easeOutCubic(progress) * 100);
+
+            bar.style.width = pct + '%';
+            pctText.textContent = pct + '%';
+
+            if (progress < 1) {
+                requestAnimationFrame(tick);
+            } else {
+                // All done – fade out then redirect
+                document.body.classList.add('fade-out');
+                setTimeout(function () {
+                    sessionStorage.setItem('fromLoader', '1');
+                    window.location.replace('index.html');
+                }, 650);
+            }
+        }
+
+        requestAnimationFrame(tick);
+    </script>
+</body>
+</html>

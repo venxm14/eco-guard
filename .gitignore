@@ -1,0 +1,15 @@
+node_modules/
+.env
+uploads/
+.DS_Store
+.netlify/
+
+# lockfiles (optional)
+# package-lock.json
+
+node_modules/
+uploads/
+.env
+node_modules/
+uploads/
+.env
