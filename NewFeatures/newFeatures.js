@@ -212,20 +212,37 @@
     }
 
     return `
-    <div class="nf-story-card" style="animation-delay:${index * 0.08}s">
+    <div class="nf-story-card" style="animation-delay:${index * 0.08}s" data-story-id="${story.id}">
       ${imageSection}
       <div class="nf-story-body">
         <div class="nf-story-meta">
-          <div class="nf-story-avatar">${initial}</div>
-          <span>${userName}</span>
+          <div class="nf-story-avatar" onclick="if(window.app) window.app.openUserProfile('${story.user_id}')">${initial}</div>
+          <div class="nf-story-user-info">
+            <span class="nf-story-username">${userName}</span>
+            ${story.users?.is_verified ? `<span class="verified-icon"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>` : ''}
+            <span class="nf-story-time">${timeAgo}</span>
+          </div>
         </div>
         <div class="nf-story-title">${escapeHTML(story.title)}</div>
         ${story.description ? `<div class="nf-story-desc">${escapeHTML(story.description)}</div>` : ''}
-        <div class="nf-story-footer">
-          <button class="nf-like-btn ${isStoryLiked(story.id) ? 'liked' : ''}" data-story-id="${story.id}">
-            ❤️ <span>${story.likes_count || 0}</span>
-          </button>
-          <span class="nf-story-time">${timeAgo}</span>
+        
+        <div class="social-actions" style="margin-top:12px; padding-top:8px;">
+            <button class="social-btn like-btn ${isStoryLiked(story.id) ? 'liked' : ''}" onclick="if(window.app) window.app.handleSocialAction('like', '${story.id}', 'story', this)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                <span class="count">${story.likes_count || 0}</span>
+            </button>
+            <button class="social-btn comment-btn" onclick="if(window.app) window.app.toggleComments('${story.id}', 'story', this)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            </button>
+            <button class="social-btn share-btn" onclick="if(window.app) window.app.handleSocialAction('share', '${story.id}', 'story', this)">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            </button>
+        </div>
+        <div class="comment-section-mini" id="comments-${story.id}">
+            <div class="comment-list-mini" id="commentList-${story.id}"></div>
+            <div class="comment-input-area">
+                <input type="text" placeholder="Post a reply..." onkeydown="if(event.key==='Enter' && window.app) window.app.postComment('${story.id}', 'story', this.value, this)">
+            </div>
         </div>
       </div>
     </div>`;
@@ -451,18 +468,44 @@
       list.innerHTML = sightings.map(s => {
         const icon = getSpeciesIcon(s.species_name);
         const userName = s.users?.name || 'Anonymous';
+        const isVerified = s.users?.is_verified;
         const timeAgo = getTimeAgo(s.created_at);
+        const likesCount = s.likes_count || 0;
         const thumbHtml = s.image_url
-          ? `<img src="${s.image_url}" alt="${escapeHTML(s.species_name)}" class="nf-sighting-thumb" data-nf-popup-img="${s.image_url}">`
+          ? `<img src="${s.image_url}" alt="${escapeHTML(s.species_name)}" class="nf-sighting-thumb" data-nf-popup-img="${s.image_url}" onclick="if(window.app) window.app.openImagePopup('${s.image_url}')">`
           : '';
         return `
-          <div class="nf-sighting-item">
+          <div class="nf-sighting-item" data-sighting-id="${s.id}">
             <div class="nf-sighting-icon">${icon}</div>
             <div class="nf-sighting-info">
-              <h4>${escapeHTML(s.species_name)}</h4>
+              <div class="nf-sighting-user-line">
+                <span class="nf-sighting-user" onclick="if(window.app) window.app.openUserProfile('${s.user_id}')">${escapeHTML(userName)}</span>
+                ${isVerified ? `<span class="verified-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>` : ''}
+                <span class="nf-sighting-time">• ${timeAgo}</span>
+              </div>
+              <h4 style="margin: 4px 0;">${escapeHTML(s.species_name)}</h4>
               ${s.description ? `<p>${escapeHTML(s.description)}</p>` : ''}
               ${thumbHtml}
-              <div class="nf-sighting-meta">📍 ${escapeHTML(s.location || 'Unknown')} • ${userName} • ${timeAgo}</div>
+              <div class="nf-sighting-meta">📍 ${escapeHTML(s.location || 'Unknown')}</div>
+              
+              <div class="social-actions" style="border-top:none; margin-top:5px; padding-top:0;">
+                <button class="social-btn like-btn" onclick="if(window.app) window.app.handleSocialAction('like', '${s.id}', 'sighting', this)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                    <span class="count">${likesCount}</span>
+                </button>
+                <button class="social-btn comment-btn" onclick="if(window.app) window.app.toggleComments('${s.id}', 'sighting', this)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                </button>
+                <button class="social-btn share-btn" onclick="if(window.app) window.app.handleSocialAction('share', '${s.id}', 'sighting', this)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                </button>
+              </div>
+              <div class="comment-section-mini" id="comments-${s.id}">
+                <div class="comment-list-mini" id="commentList-${s.id}"></div>
+                <div class="comment-input-area">
+                    <input type="text" placeholder="Post a reply..." onkeydown="if(event.key==='Enter' && window.app) window.app.postComment('${s.id}', 'sighting', this.value, this)">
+                </div>
+              </div>
             </div>
           </div>`;
       }).join('');

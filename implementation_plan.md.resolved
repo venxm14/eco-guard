@@ -1,0 +1,76 @@
+# Social Features & Mobile Layout Enhancement Plan
+
+This plan outlines the steps to add social interaction (likes, comments, sharing) to reports and sightings, implement a high-quality mobile layout, and add a settings menu.
+
+## Proposed Changes
+
+### Database Schema
+
+#### [NEW] `social_schema.sql`
+Create a new SQL file to define the `comments` and `likes` tables and update existing tables.
+- `comments` table: [id](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/NewFeatures/newFeatures.js#246-253), `user_id`, `item_id`, `item_type` (report/sighting), `text`, `created_at`.
+- `likes` table: [id](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/NewFeatures/newFeatures.js#246-253), `user_id`, `item_id`, `item_type`.
+- Add `likes_count` to `eco_reports` and `eco_sightings`.
+
+### Backend Implementation
+
+#### [MODIFY] [server.js](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/server.js)
+- Add endpoints for posting and getting comments.
+- Add endpoint for toggling likes.
+- Update report/sighting fetch logic to return like/comment counts.
+
+### Frontend Implementation
+
+#### [MODIFY] [index.html](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/index.html)
+- Add containers for comments and buttons for likes/sharing in the report cards.
+- Add a new "Settings" section/modal.
+- Add a mobile bottom navigation bar.
+
+#### [MODIFY] [styles.css](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/styles.css)
+- Implement glassmorphism styles for a "premium" feel.
+- Add styles for the bottom navigation bar.
+- Add animations for section transitions.
+- Implement dark mode variables.
+
+#### [MODIFY] [script.js](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/script.js)
+- Implement like/comment/share logic for the main reporting portal.
+- Add mobile navigation handling (bottom bar).
+- Implement settings logic (theme toggle, etc.).
+
+#### [MODIFY] [NewFeatures/newFeatures.js](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/NewFeatures/newFeatures.js)
+- Implement like/comment/share logic for the Biodiversity Tracker (sightings).
+- Reuse the common social logic if possible.
+
+## Mobile UX Accessibility Enhancements
+
+To solve the issue of the Biodiversity Tracker being hard to reach on mobile, I will implement a "Tabbed Feed" architecture.
+
+### [Component] Navigation & Feed Architecture
+
+#### [MODIFY] [index.html](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/index.html)
+- Add a "Sightings" item to the `bottom-nav`.
+- Add a new `feed-tabs` container inside the Reporting section for switching between:
+  - **Reports** (Pollution reports)
+  - **Sightings** (Biodiversity Tracker)
+  - **Stories** (Eco-Stories)
+
+#### [MODIFY] [socialStyles.css](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/socialStyles.css)
+- Create a sticky tab bar style with active indicators (Twitter-like).
+- Optimize the bottom nav for 5 items.
+- Add smooth transitions when switching tabs and hide overflowing content.
+
+#### [MODIFY] [script.js](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/script.js)
+- Implement `switchFeed(type)` logic to toggle between reporting, sightings, and stories.
+- Handle bottom nav redirection to the specific feed tab.
+- Integrate the `NewFeatures` sightings list into the main feed container when the "Sightings" tab is chosen.
+
+#### [MODIFY] [NewFeatures/newFeatures.js](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/NewFeatures/newFeatures.js)
+- Adjust visibility logic so Sightings can exist as a tab instead of just a standalone section.
+
+## Verification Plan
+
+### Manual Verification
+- **Bottom Nav**: Click "Sightings", verify it scrolls to the feed and selects the "Sightings" tab.
+- **Tab Switching**: Tap "Reports" -> "Sightings" -> "Stories", verify content updates instantly without full page scroll.
+- **Stickiness**: Scroll down the feed and ensure the tabs stay at the top of the mobile viewport.
+

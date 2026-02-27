@@ -194,7 +194,7 @@ router.get('/api/sightings', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('eco_sightings')
-      .select('*, users!user_id(name)')
+      .select('*, users!user_id(name, is_verified)')
       .order('created_at', { ascending: false });
 
     if (error) {

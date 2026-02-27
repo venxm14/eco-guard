@@ -782,10 +782,10 @@ app.get('/api/reports', async (req, res) => {
       .select('*', { count: 'exact', head: true });
     console.log(`📊 Total reports in database (including deleted): ${totalCount || 0}`);
 
-    // Try without join first (more reliable)
+    // Try with join to get user names and include social counts
     const { data, error } = await supabase
       .from('eco_reports')
-      .select('*')
+      .select('*, users!user_id(name, is_verified)')
       .is('deleted_at', null) // Filter out soft-deleted reports
       .order('created_at', { ascending: false });
 
@@ -1517,6 +1517,7 @@ app.get('/api/experiences', async (req, res) => {
    NEW FEATURES MODULE (uncomment to activate)
 ================================ */
 app.use(require('./NewFeatures/newFeaturesRoutes'));
+app.use(require('./NewFeatures/socialRoutes'));
 require('./NewFeatures/reminderCron');
 
 /* ===============================

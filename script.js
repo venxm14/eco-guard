@@ -253,6 +253,7 @@ class GoaEcoGuard {
         this.initNavbarScroll();
         this.initViewOnMapButtons();
         this.initLeafParticles();
+        this.initSettingsHandlers();
         this.showToast('Welcome to Goa Eco-Guard!', 'success');
     }
 
@@ -943,23 +944,318 @@ class GoaEcoGuard {
                 const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
                 const statusClass = `status-${status}`;
                 const timeStr = formatReportTime(r.created_at || r.createdAt || r.timestamp);
+                const userName = r.users?.name || 'Anonymous';
+                const isVerified = r.users?.is_verified;
+                const likesCount = r.likes_count || 0;
 
                 return `
-                <div class="report-card ${statusClass}">
+                <div class="report-card ${statusClass} glass-card" data-report-id="${r.id}">
                     <div class="report-header">
-                        ${r.image ? `<img src="${resolveImageUrl(r.image)}" alt="${escapeHtml(r.location || 'Report')}" class="report-image">` : `<div class="report-image-placeholder">📷</div>`}
+                        ${r.image ? `<img src="${resolveImageUrl(r.image)}" alt="${escapeHtml(r.location || 'Report')}" class="report-image" onclick="window.app.openImagePopup('${resolveImageUrl(r.image)}')">` : `<div class="report-image-placeholder">📷</div>`}
                         <div class="report-info">
+                            <div class="report-user-line">
+                                <span class="report-user" onclick="window.app.openUserProfile('${r.user_id}')">${escapeHtml(userName)}</span>
+                                ${isVerified ? `<span class="verified-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>` : ''}
+                                <span class="report-time-mini">• ${escapeHtml(timeStr)}</span>
+                            </div>
                             <div class="report-location">${escapeHtml(r.location || 'Location not specified')}</div>
                             <div class="report-description">${escapeHtml(r.description || 'No description')}</div>
-                            <div class="report-meta">
-                                <div class="report-time">${escapeHtml(timeStr)}</div>
-                                <div class="report-status ${escapeHtml(status)}">${escapeHtml(statusLabel)}</div>
+                            
+                            <div class="social-actions">
+                                <button class="social-btn like-btn" onclick="window.app.handleSocialAction('like', '${r.id}', 'report', this)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                                    <span class="count">${likesCount}</span>
+                                </button>
+                                <button class="social-btn comment-btn" onclick="window.app.toggleComments('${r.id}', 'report', this)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                                </button>
+                                <button class="social-btn repost-btn" onclick="window.app.handleSocialAction('repost', '${r.id}', 'report', this)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+                                </button>
+                                <button class="social-btn share-btn" onclick="window.app.handleSocialAction('share', '${r.id}', 'report', this)">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                                </button>
+                            </div>
+
+                            <div class="comment-section-mini" id="comments-${r.id}">
+                                <div class="comment-list-mini" id="commentList-${r.id}"></div>
+                                <div class="comment-input-area">
+                                    <input type="text" placeholder="Post a reply..." onkeydown="if(event.key==='Enter') window.app.postComment('${r.id}', 'report', this.value, this)">
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>`;
             }).join('')
             : `<p class="text-center">No reports yet.</p>`;
+    }
+
+    /* ---------- SOCIAL ACTIONS ---------- */
+    async handleSocialAction(action, itemId, itemType, btn) {
+        if (!this.auth.isAuthenticated()) {
+            this.showToast('Please login to interact!', 'error');
+            return;
+        }
+
+        if (action === 'like') {
+            try {
+                const res = await fetch(`${API_BASE}/api/social/like`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...this.auth.getAuthHeader() },
+                    body: JSON.stringify({ item_id: itemId, item_type: itemType })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    const countSpan = btn.querySelector('.count');
+                    if (countSpan) countSpan.innerText = data.likes_count;
+                    btn.classList.toggle('liked', data.action === 'liked');
+                }
+            } catch (err) { console.error('Like error:', err); }
+        }
+
+        if (action === 'share') {
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Goa Eco-Guard Report',
+                    text: 'Check out this environmental report on Goa Eco-Guard!',
+                    url: window.location.href + '?report=' + itemId
+                }).catch(console.error);
+            } else {
+                navigator.clipboard.writeText(window.location.href + '?report=' + itemId);
+                this.showToast('Link copied to clipboard!', 'success');
+            }
+        }
+
+        if (action === 'repost') {
+            const commentary = prompt('Add your thoughts (optional):');
+            if (commentary === null) return; // cancelled
+
+            try {
+                const res = await fetch(`${API_BASE}/api/social/repost`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...this.auth.getAuthHeader() },
+                    body: JSON.stringify({ original_item_id: itemId, item_type: itemType, commentary })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    this.showToast('Successfully reposted to your Eco-Feed! 🌿', 'success');
+                    btn.classList.add('reposted');
+                }
+            } catch (err) { this.showToast('Failed to repost', 'error'); }
+        }
+    }
+
+    async toggleComments(itemId, itemType, btn) {
+        const section = document.getElementById(`comments-${itemId}`);
+        if (!section) return;
+
+        section.classList.toggle('active');
+        if (section.classList.contains('active')) {
+            // Load comments
+            const list = document.getElementById(`commentList-${itemId}`);
+            list.innerHTML = '<p style="font-size:0.7rem; padding:0.5rem;">Loading replies...</p>';
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/social/comments/${itemType}/${itemId}`);
+                const comments = await res.json();
+                list.innerHTML = comments.length ? comments.map(c => `
+                    <div class="comment-item">
+                        <span class="comment-user">${escapeHtml(c.users?.name || 'User')}:</span>
+                        <span class="comment-text">${escapeHtml(c.text)}</span>
+                    </div>
+                `).join('') : '<p style="font-size:0.7rem; padding:0.5rem; color:var(--muted-foreground);">No replies yet.</p>';
+            } catch (err) { list.innerHTML = 'Error loading replies.'; }
+        }
+    }
+
+    async postComment(itemId, itemType, text, input) {
+        if (!text.trim()) return;
+        if (!this.auth.isAuthenticated()) { this.showToast('Please login to reply', 'error'); return; }
+
+        try {
+            const res = await fetch(`${API_BASE}/api/social/comment`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...this.auth.getAuthHeader() },
+                body: JSON.stringify({ item_id: itemId, item_type: itemType, text })
+            });
+            const data = await res.json();
+            if (data.success) {
+                input.value = '';
+                const list = document.getElementById(`commentList-${itemId}`);
+                const noComments = list.querySelector('p');
+                if (noComments) list.innerHTML = '';
+                
+                const newComment = document.createElement('div');
+                newComment.className = 'comment-item';
+                newComment.innerHTML = `
+                    <span class="comment-user">${escapeHtml(this.auth.user.name)}:</span>
+                    <span class="comment-text">${escapeHtml(text)}</span>
+                `;
+                list.appendChild(newComment);
+            }
+        } catch (err) { this.showToast('Failed to post reply', 'error'); }
+    }
+
+    /* ---------- SETTINGS & PROFILE ---------- */
+    initSettingsHandlers() {
+        const modal = document.getElementById('settingsModal');
+        const openBtn = document.getElementById('openSettingsBtn');
+        const closeBtn = modal?.querySelector('.close-modal');
+        const darkToggle = document.getElementById('darkModeToggle');
+
+        openBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            this.updateSettingsProfile();
+            modal.classList.add('active');
+        });
+
+        closeBtn?.addEventListener('click', () => modal.classList.remove('active'));
+        
+        darkToggle?.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                document.body.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+            } else {
+                document.body.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+            }
+        });
+
+        // Feed tabs switching
+        document.querySelectorAll('.feed-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const feedType = tab.dataset.feed;
+                this.switchFeed(feedType);
+            });
+        });
+
+        // Bottom nav switching
+        document.querySelectorAll('.bottom-nav-item[data-tab]').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                const tab = item.dataset.tab;
+                this.switchTab(tab);
+            });
+        });
+    }
+
+    switchFeed(type) {
+        // Update tabs
+        document.querySelectorAll('.feed-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.feed === type);
+        });
+
+        // Update content
+        document.querySelectorAll('.feed-content').forEach(c => {
+            c.classList.toggle('active', c.id === `${type}Feed`);
+        });
+
+        // If sightings or stories, make sure they are loaded if empty
+        if (type === 'sightings' && typeof window.loadSightings === 'function') {
+            window.loadSightings();
+        } else if (type === 'stories' && typeof window.loadStories === 'function') {
+            window.loadStories();
+        }
+
+        // Scroll to the reporting portal if not already there
+        const section = document.getElementById('eco-reporting');
+        if (section) {
+            const rect = section.getBoundingClientRect();
+            if (rect.top < 0 || rect.top > window.innerHeight) {
+                section.scrollIntoView({ behavior: 'smooth' });
+            }
+        }
+    }
+
+    updateSettingsProfile() {
+        if (!this.auth.isAuthenticated()) {
+            document.getElementById('profileName').innerText = 'Guest User';
+            document.getElementById('profileInitial').innerText = 'G';
+            return;
+        }
+        document.getElementById('profileName').innerText = this.auth.user.name;
+        document.getElementById('profileInitial').innerText = this.auth.user.name.charAt(0).toUpperCase();
+        if (this.auth.user.is_verified) {
+            document.getElementById('profileVerified').innerHTML = '<span class="verified-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>';
+        }
+    }
+
+    switchTab(tabId) {
+        // Toggle active states
+        document.querySelectorAll('.bottom-nav-item').forEach(i => i.classList.remove('active'));
+        document.querySelector(`.bottom-nav-item[data-tab="${tabId}"]`)?.classList.add('active');
+
+        // Map section names to section IDs
+        const sections = {
+            'home': 'home',
+            'reports': 'eco-reporting',
+            'map': 'heatmap',
+            'missions': 'volunteer',
+            'sightings': 'eco-reporting' // Redirection to reports with tab
+        };
+
+        if (tabId === 'sightings') {
+            this.switchFeed('sightings');
+        } else if (tabId === 'reports') {
+            this.switchFeed('reports');
+        }
+
+        const target = sections[tabId];
+        if (target) {
+            this.scrollToSection(target);
+        }
+    }
+
+    async openUserProfile(userId) {
+        if (!userId) return;
+        
+        try {
+            const res = await fetch(`${API_BASE}/api/social/profile/${userId}`);
+            const data = await res.json();
+            
+            // Create a quick modal for profile
+            const modal = document.createElement('div');
+            modal.className = 'modal active';
+            modal.innerHTML = `
+                <div class="modal-content glass-panel" style="max-width:600px;">
+                    <button class="close-modal" onclick="this.closest('.modal').remove()">&times;</button>
+                    <div class="profile-banner">
+                        <div class="profile-pic">${data.user.name.charAt(0).toUpperCase()}</div>
+                        <h2>${escapeHtml(data.user.name)} ${data.user.is_verified ? '<span class="verified-icon"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>' : ''}</h2>
+                        <div class="profile-stats">
+                            <div class="profile-stat-item"><span class="profile-stat-val">${data.stats.followers}</span><span class="profile-stat-label">Followers</span></div>
+                            <div class="profile-stat-item"><span class="profile-stat-val">${data.stats.following}</span><span class="profile-stat-label">Following</span></div>
+                            <div class="profile-stat-item"><span class="profile-stat-val">${data.feed.length}</span><span class="profile-stat-label">Impacts</span></div>
+                        </div>
+                    </div>
+                    <div class="profile-feed" style="max-height:400px; overflow-y:auto; margin-top:1rem;">
+                        <h3 style="margin-bottom:1rem; border-bottom:1px solid var(--border); padding-bottom:0.5rem;">Eco-Feed</h3>
+                        ${data.feed.length ? data.feed.map(item => `
+                            <div class="feed-item" style="padding:0.75rem; border-bottom:1px solid rgba(255,255,255,0.05);">
+                                <div style="color:var(--primary); font-size:0.8rem; margin-bottom:0.25rem;">${item.latitude ? 'Report' : 'Sighting'}</div>
+                                <div>${escapeHtml(item.description || item.species_name)}</div>
+                                <div style="font-size:0.75rem; color:var(--muted-foreground); margin-top:0.25rem;">📍 ${escapeHtml(item.location)}</div>
+                            </div>
+                        `).join('') : '<p class="text-center">No impact reports yet.</p>'}
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        } catch (err) { this.showToast('Could not load profile', 'error'); }
+    }
+
+    openImagePopup(url) {
+        if (!url) return;
+        const modal = document.createElement('div');
+        modal.className = 'modal active';
+        modal.style.zIndex = '10001';
+        modal.innerHTML = `
+            <div class="modal-content" style="background:none; border:none; box-shadow:none; padding:0; display:flex; align-items:center; justify-content:center;">
+                <button class="close-modal" onclick="this.closest('.modal').remove()" style="top:-30px; right:-30px; color:white; font-size:2.5rem;">&times;</button>
+                <img src="${url}" style="max-width:95vw; max-height:90vh; border-radius:12px; box-shadow:0 0 50px rgba(0,0,0,0.8);">
+            </div>
+        `;
+        document.body.appendChild(modal);
     }
 
 
