@@ -10,12 +10,25 @@ const fs = require('fs');
 const path = require('path');
 const nodemailer = require('nodemailer');
 
+// Validate essential Environment Variables
+const requiredEnv = ['SUPABASE_URL', 'SUPABASE_KEY', 'JWT_SECRET'];
+const missingEnv = requiredEnv.filter(k => !process.env[k]);
+
+if (missingEnv.length > 0) {
+  console.error(`❌ CRITICAL ERROR: Missing configuration in .env: ${missingEnv.join(', ')}`);
+  console.warn('💡 Tip: Ensure your .env file is present in the project root and contains these keys.');
+}
+
+if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  console.warn('⚠️ EMAIL_USER or EMAIL_PASS not found. Email notifications will be disabled.');
+}
+
 // Email transporter — uses Gmail App Password from .env
 const emailTransporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+    user: process.env.EMAIL_USER || 'placeholder@gmail.com',
+    pass: process.env.EMAIL_PASS || 'placeholder'
   }
 });
 
@@ -32,7 +45,7 @@ app.use(cors({
     'http://127.0.0.1:5502',
     'http://localhost:3000',
     'http://localhost:5501',  // Add if using different port
-    'file://'                 // Add if opening HTML file directly
+    'file://'                 
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -47,18 +60,71 @@ app.use(express.static(path.join(__dirname)));
 /* ===============================
    SUPABASE
 ================================ */
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+  console.error('❌ CRITICAL ERROR: SUPABASE_URL or SUPABASE_KEY is missing from .env!');
+  console.error('Please ensure your .env file exists and contains these variables.');
+}
+
 // Public client (for reads, subject to RLS)
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
+  process.env.SUPABASE_URL || '',
+  process.env.SUPABASE_KEY || ''
 );
 
 // Service role client (for writes, bypasses RLS)
-// Use SUPABASE_SERVICE_ROLE_KEY from .env if available, otherwise fall back to SUPABASE_KEY
 const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY
+  process.env.SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || ''
 );
+
+console.log('✅ Supabase clients initialized (URL:', process.env.SUPABASE_URL ? 'OK' : 'MISSING', ')');
+
+/* ===============================
+   NETWORK DIAGNOSTICS (for debugging)
+================================ */
+app.get('/api/debug-network', async (req, res) => {
+  const diagnostic = {
+    supabaseUrl: process.env.SUPABASE_URL || 'MISSING',
+    timestamp: new Date().toISOString(),
+    env: Object.keys(process.env).filter(k => k.includes('SUPABASE')),
+    tests: {}
+  };
+
+  try {
+    console.log('🔍 Running Network Diagnostic...');
+    
+    // Test 1: DNS & Basic Fetch (Supabase)
+    const start = Date.now();
+    const testFetch = await fetch(process.env.SUPABASE_URL).catch(e => ({ error: e.message }));
+    diagnostic.tests.supabaseFetch = {
+        status: testFetch.status || 'FAILED',
+        error: testFetch.error || null,
+        duration: `${Date.now() - start}ms`
+    };
+
+    // Test 1b: General Internet Test (Google)
+    const gStart = Date.now();
+    const testGoogle = await fetch('https://www.google.com').catch(e => ({ error: e.message }));
+    diagnostic.tests.googleFetch = {
+        status: testGoogle.status || 'FAILED',
+        error: testGoogle.error || null,
+        duration: `${Date.now() - gStart}ms`
+    };
+
+    // Test 2: Database Query
+    const dbStart = Date.now();
+    const { data: dbData, error: dbError } = await supabase.from('eco_reports').select('id').limit(1);
+    diagnostic.tests.dbQuery = {
+        success: !dbError,
+        error: dbError || null,
+        duration: `${Date.now() - dbStart}ms`
+    };
+
+    res.json(diagnostic);
+  } catch (err) {
+    res.status(500).json({ error: err.message, diagnostic });
+  }
+});
 
 /* ===============================
    MULTER (IMAGE UPLOAD - memory storage)
@@ -459,7 +525,7 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
 
-  const { data: user } = await supabase
+  const { data: user } = await supabaseAdmin
     .from('users')
     .select('*')
     .eq('email', email)
@@ -478,6 +544,122 @@ app.post('/api/auth/login', async (req, res) => {
 
   delete user.password;
   res.json({ token, user });
+});
+
+/* ===============================
+   USER PROFILE & STATS
+================================ */
+
+// GET /api/profile/stats - Get all stats for specific user
+app.get('/api/profile/stats/:userId', authenticateToken, async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // 1. Reports detailed
+    const { data: reportsData, count: reportsCount } = await supabase
+      .from('eco_reports')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+
+    // 2. Sightings detailed
+    const { data: sightingsData, count: sightingsCount } = await supabase
+      .from('eco_sightings')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    // 3. Stories detailed
+    const { data: storiesData, count: storiesCount } = await supabase
+      .from('eco_stories')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    // 4. Missions count (joined)
+    let email = req.user.email;
+    if (!email) {
+        const { data: userData } = await supabase.from('users').select('email').eq('id', userId).single();
+        email = userData?.email;
+    }
+
+    const { data: missions } = await supabase
+      .from('mission_registrations')
+      .select('mission_id, created_at, missions(title, date, location)')
+      .eq('email', email)
+      .order('created_at', { ascending: false });
+
+    res.json({
+      counts: {
+        reports: reportsCount || 0,
+        sightings: sightingsCount || 0,
+        stories: storiesCount || 0,
+        missions: missions?.length || 0
+      },
+      details: {
+        reports: reportsData || [],
+        sightings: sightingsData || [],
+        stories: storiesData || [],
+        missions: missions || []
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/profile/update - Update name and phone
+app.put('/api/profile/update', authenticateToken, async (req, res) => {
+    try {
+        const { name, phone } = req.body;
+        const userId = req.user.userId;
+
+        const { data, error } = await supabaseAdmin
+            .from('users')
+            .update({ name, phone })
+            .eq('id', userId)
+            .select('id, name, email, phone, role, is_verified')
+            .single();
+
+        if (error) throw error;
+        res.json({ success: true, user: data });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+// GET /api/notifications - Get user notifications
+app.get('/api/notifications', authenticateToken, async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('social_notifications')
+            .select(`
+                *,
+                actor:actor_id(name)
+            `)
+            .eq('recipient_id', req.user.userId)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        if (error) throw error;
+        res.json(data || []);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/notifications/read - Mark all as read
+app.post('/api/notifications/read', authenticateToken, async (req, res) => {
+    try {
+        await supabaseAdmin
+            .from('social_notifications')
+            .update({ is_read: true })
+            .eq('recipient_id', req.user.userId);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 /* ===============================

@@ -5,9 +5,42 @@
 const API_BASE =
     window.__API_BASE__ ||
     document.querySelector('meta[name="api-base"]')?.content ||
-    ((location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ((location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:')
         ? 'http://localhost:3000'
         : location.origin);
+
+/**
+ * Premium Toast Notifications
+ */
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container') || (() => {
+        const c = document.createElement('div');
+        c.id = 'toast-container';
+        document.body.appendChild(c);
+        return c;
+    })();
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `
+        <div class="toast-content">
+            <span class="toast-icon">${type === 'success' ? '✅' : (type === 'error' ? '❌' : 'ℹ️')}</span>
+            <span class="toast-msg">${message}</span>
+        </div>
+    `;
+
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+    }, 10);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(20px)';
+        setTimeout(() => toast.remove(), 500);
+    }, 3500);
+}
 
 function setCookie(name, value, days) {
     const expires = new Date(Date.now() + days * 864e5).toUTCString();
@@ -141,6 +174,12 @@ class AuthManager {
         setCookie('ecoUser', JSON.stringify(data.user), 30);
 
         return data;
+    }
+
+    updateUser(userData) {
+        this.user = { ...this.user, ...userData };
+        localStorage.setItem('ecoUser', JSON.stringify(this.user));
+        setCookie('ecoUser', JSON.stringify(this.user), 30);
     }
 
     async register(payload) {
@@ -514,9 +553,17 @@ class GoaEcoGuard {
 
         // Forward geocoding for manual location entry
         const locationInput = document.getElementById('location');
+        const getLocationBtn = document.getElementById('getLocationBtn');
         if (locationInput) {
             let debounceTimer;
             locationInput.addEventListener('input', () => {
+                // Hide "Use Current Location" if user starts typing a lot
+                if (locationInput.value.length > 3) {
+                    getLocationBtn.style.display = 'none';
+                } else if (locationInput.value.length === 0) {
+                    getLocationBtn.style.display = 'block';
+                }
+
                 clearTimeout(debounceTimer);
                 debounceTimer = setTimeout(() => this.searchLocation(locationInput.value), 800);
             });
@@ -923,27 +970,13 @@ class GoaEcoGuard {
             console.log('📋 First report:', this.reports[0]);
         }
 
-        // helper to format created_at safely
-        const formatReportTime = (ts) => {
-            if (!ts) return 'Unknown time';
-            const d = new Date(ts);
-            if (isNaN(d)) return ts;
-            return d.toLocaleString();
-        };
-
-        const escapeHtml = (s = '') => String(s)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
 
         container.innerHTML = this.reports.length
             ? this.reports.map(r => {
                 const status = (r.status || 'pending').toLowerCase();
                 const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
                 const statusClass = `status-${status}`;
-                const timeStr = formatReportTime(r.created_at || r.createdAt || r.timestamp);
+                const timeStr = this.formatReportTime(r.created_at || r.createdAt || r.timestamp);
                 const userName = r.users?.name || 'Anonymous';
                 const isVerified = r.users?.is_verified;
                 const likesCount = r.likes_count || 0;
@@ -951,15 +984,15 @@ class GoaEcoGuard {
                 return `
                 <div class="report-card ${statusClass} glass-card" data-report-id="${r.id}">
                     <div class="report-header">
-                        ${r.image ? `<img src="${resolveImageUrl(r.image)}" alt="${escapeHtml(r.location || 'Report')}" class="report-image" onclick="window.app.openImagePopup('${resolveImageUrl(r.image)}')">` : `<div class="report-image-placeholder">📷</div>`}
+                        ${r.image ? `<img src="${resolveImageUrl(r.image)}" alt="${this.escapeHtml(r.location || 'Report')}" class="report-image" onclick="window.app.openImagePopup('${resolveImageUrl(r.image)}')">` : `<div class="report-image-placeholder">📷</div>`}
                         <div class="report-info">
                             <div class="report-user-line">
-                                <span class="report-user" onclick="window.app.openUserProfile('${r.user_id}')">${escapeHtml(userName)}</span>
+                                <span class="report-user" onclick="window.app.openUserProfile('${r.user_id}')">${this.escapeHtml(userName)}</span>
                                 ${isVerified ? `<span class="verified-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>` : ''}
-                                <span class="report-time-mini">• ${escapeHtml(timeStr)}</span>
+                                <span class="report-time-mini">• ${this.escapeHtml(timeStr)}</span>
                             </div>
-                            <div class="report-location">${escapeHtml(r.location || 'Location not specified')}</div>
-                            <div class="report-description">${escapeHtml(r.description || 'No description')}</div>
+                            <div class="report-location">${this.escapeHtml(r.location || 'Location not specified')}</div>
+                            <div class="report-description">${this.escapeHtml(r.description || 'No description')}</div>
                             
                             <div class="social-actions">
                                 <button class="social-btn like-btn" onclick="window.app.handleSocialAction('like', '${r.id}', 'report', this)">
@@ -968,6 +1001,7 @@ class GoaEcoGuard {
                                 </button>
                                 <button class="social-btn comment-btn" onclick="window.app.toggleComments('${r.id}', 'report', this)">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                                    <span class="count">${r.comments_count || 0}</span>
                                 </button>
                                 <button class="social-btn repost-btn" onclick="window.app.handleSocialAction('repost', '${r.id}', 'report', this)">
                                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
@@ -980,7 +1014,7 @@ class GoaEcoGuard {
                             <div class="comment-section-mini" id="comments-${r.id}">
                                 <div class="comment-list-mini" id="commentList-${r.id}"></div>
                                 <div class="comment-input-area">
-                                    <input type="text" placeholder="Post a reply..." onkeydown="if(event.key==='Enter') window.app.postComment('${r.id}', 'report', this.value, this)">
+                                    <input type="text" id="commentInput-${r.id}" placeholder="Post a reply..." onkeydown="if(event.key==='Enter') window.app.postComment('${r.id}', 'report', this.value, this)">
                                 </div>
                             </div>
                         </div>
@@ -1009,6 +1043,11 @@ class GoaEcoGuard {
                     const countSpan = btn.querySelector('.count');
                     if (countSpan) countSpan.innerText = data.likes_count;
                     btn.classList.toggle('liked', data.action === 'liked');
+                    
+                    // Visual feedback
+                    if (data.action === 'liked') {
+                        this.showToast('Impact liked! ❤️', 'success');
+                    }
                 }
             } catch (err) { console.error('Like error:', err); }
         }
@@ -1051,6 +1090,10 @@ class GoaEcoGuard {
 
         section.classList.toggle('active');
         if (section.classList.contains('active')) {
+            // Auto-focus input
+            const input = section.querySelector('input');
+            if (input) setTimeout(() => input.focus(), 100);
+
             // Load comments
             const list = document.getElementById(`commentList-${itemId}`);
             list.innerHTML = '<p style="font-size:0.7rem; padding:0.5rem;">Loading replies...</p>';
@@ -1060,11 +1103,25 @@ class GoaEcoGuard {
                 const comments = await res.json();
                 list.innerHTML = comments.length ? comments.map(c => `
                     <div class="comment-item">
-                        <span class="comment-user">${escapeHtml(c.users?.name || 'User')}:</span>
-                        <span class="comment-text">${escapeHtml(c.text)}</span>
+                        <div class="comment-main">
+                            <span class="comment-user">${this.escapeHtml(c.users?.name || 'User')}</span>
+                            <span class="comment-text">${this.escapeHtml(c.text)}</span>
+                            <div class="comment-footer-actions">
+                                <span class="comment-time">${new Date(c.created_at).toLocaleDateString()}</span>
+                                <button class="comment-reply-mini-btn" onclick="window.app.replyToComment('${this.escapeHtml(c.users?.name || 'User')}', '${itemId}')">Reply</button>
+                            </div>
+                        </div>
                     </div>
-                `).join('') : '<p style="font-size:0.7rem; padding:0.5rem; color:var(--muted-foreground);">No replies yet.</p>';
+                `).join('') : '<p class="empty-msg" style="padding:0.5rem;">No comments yet.</p>';
             } catch (err) { list.innerHTML = 'Error loading replies.'; }
+        }
+    }
+
+    replyToComment(username, itemId) {
+        const input = document.getElementById(`commentInput-${itemId}`);
+        if (input) {
+            input.value = `@${username} `;
+            input.focus();
         }
     }
 
@@ -1079,20 +1136,27 @@ class GoaEcoGuard {
                 body: JSON.stringify({ item_id: itemId, item_type: itemType, text })
             });
             const data = await res.json();
-            if (data.success) {
-                input.value = '';
-                const list = document.getElementById(`commentList-${itemId}`);
-                const noComments = list.querySelector('p');
-                if (noComments) list.innerHTML = '';
-                
-                const newComment = document.createElement('div');
-                newComment.className = 'comment-item';
-                newComment.innerHTML = `
-                    <span class="comment-user">${escapeHtml(this.auth.user.name)}:</span>
-                    <span class="comment-text">${escapeHtml(text)}</span>
-                `;
-                list.appendChild(newComment);
-            }
+                if (data.success) {
+                    input.value = '';
+                    const list = document.getElementById(`commentList-${itemId}`);
+                    const noComments = list.querySelector('.empty-msg');
+                    if (noComments) list.innerHTML = '';
+                    
+                    const newComment = document.createElement('div');
+                    newComment.className = 'comment-item';
+                    newComment.innerHTML = `
+                        <div class="comment-main">
+                            <span class="comment-user">${this.escapeHtml(this.auth.user.name)}</span>
+                            <span class="comment-text">${this.escapeHtml(text)}</span>
+                            <div class="comment-footer-actions">
+                                <span class="comment-time">Just now</span>
+                                <button class="comment-reply-mini-btn" onclick="window.app.replyToComment('${this.escapeHtml(this.auth.user.name)}', '${itemId}')">Reply</button>
+                            </div>
+                        </div>
+                    `;
+                    list.appendChild(newComment);
+                    list.scrollTop = list.scrollHeight;
+                }
         } catch (err) { this.showToast('Failed to post reply', 'error'); }
     }
 
@@ -1100,28 +1164,45 @@ class GoaEcoGuard {
     initSettingsHandlers() {
         const modal = document.getElementById('settingsModal');
         const openBtn = document.getElementById('openSettingsBtn');
+        const desktopOpenBtn = document.getElementById('desktopSettingsBtn');
         const closeBtn = modal?.querySelector('.close-modal');
-        const darkToggle = document.getElementById('darkModeToggle');
+        const logoutBtn = document.getElementById('dashboardLogoutBtn');
 
-        openBtn?.addEventListener('click', (e) => {
+        const openHandler = (e) => {
             e.preventDefault();
-            this.updateSettingsProfile();
-            modal.classList.add('active');
-        });
+            this.openProfileModal();
+        };
+
+        openBtn?.addEventListener('click', openHandler);
+        desktopOpenBtn?.addEventListener('click', openHandler);
 
         closeBtn?.addEventListener('click', () => modal.classList.remove('active'));
         
-        darkToggle?.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                document.body.classList.add('dark');
-                localStorage.setItem('theme', 'dark');
-            } else {
-                document.body.classList.remove('dark');
-                localStorage.setItem('theme', 'light');
-            }
-        });
+        // Logout
+        logoutBtn?.addEventListener('click', () => this.auth.logout());
 
-        // Feed tabs switching
+        // Dark mode logic (moved to main body init but kept toggle listener if exists)
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        if (darkModeToggle) {
+            darkModeToggle.checked = document.body.classList.contains('dark');
+            darkModeToggle.addEventListener('change', (e) => {
+                if (e.target.checked) {
+                    document.body.classList.add('dark');
+                    localStorage.setItem('theme', 'dark');
+                } else {
+                    document.body.classList.remove('dark');
+                    localStorage.setItem('theme', 'light');
+                }
+            });
+        }
+
+        // Start polling for notifications
+        if (this.auth.isAuthenticated()) {
+            this.checkNotifications();
+            setInterval(() => this.checkNotifications(), 60000); // Every minute
+        }
+
+        // Feed tabs switching (KEEP OLD LOGIC)
         document.querySelectorAll('.feed-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 const feedType = tab.dataset.feed;
@@ -1139,71 +1220,363 @@ class GoaEcoGuard {
         });
     }
 
-    switchFeed(type) {
-        // Update tabs
-        document.querySelectorAll('.feed-tab').forEach(t => {
-            t.classList.toggle('active', t.dataset.feed === type);
+    switchDashboardTab(tabId) {
+        console.log('🔄 Switching dashboard tab to:', tabId);
+        
+        // Update buttons
+        document.querySelectorAll('.profile-tab-dash').forEach(btn => {
+            const isActive = btn.id === `tab${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`;
+            btn.classList.toggle('active', isActive);
+            btn.classList.toggle('bg-white', isActive);
+            btn.classList.toggle('dark:bg-primary', isActive);
+            btn.classList.toggle('shadow-sm', isActive);
+            btn.classList.toggle('text-slate-900', isActive);
+            btn.classList.toggle('dark:text-white', isActive);
+            btn.classList.toggle('font-semibold', isActive);
+            
+            btn.classList.toggle('text-slate-500', !isActive);
+            btn.classList.toggle('dark:text-emerald-600/60', !isActive);
+            btn.classList.toggle('font-medium', !isActive);
         });
 
-        // Update content
-        document.querySelectorAll('.feed-content').forEach(c => {
-            c.classList.toggle('active', c.id === `${type}Feed`);
+        // Update sections
+        document.querySelectorAll('.dashboard-section').forEach(section => {
+            section.classList.toggle('hidden', section.id !== `dashboardSection-${tabId}`);
         });
 
-        // If sightings or stories, make sure they are loaded if empty
-        if (type === 'sightings' && typeof window.loadSightings === 'function') {
-            window.loadSightings();
-        } else if (type === 'stories' && typeof window.loadStories === 'function') {
-            window.loadStories();
-        }
-
-        // Scroll to the reporting portal if not already there
-        const section = document.getElementById('eco-reporting');
-        if (section) {
-            const rect = section.getBoundingClientRect();
-            if (rect.top < 0 || rect.top > window.innerHeight) {
-                section.scrollIntoView({ behavior: 'smooth' });
-            }
+        if (tabId === 'alerts') {
+            this.fetchNotifications();
         }
     }
 
-    updateSettingsProfile() {
+    scrollToDashboardSection(sectionId) {
+        const el = document.getElementById(`dashListSection-${sectionId}`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    async openProfileModal() {
+        const modal = document.getElementById('settingsModal');
+        if (!modal) return;
+
         if (!this.auth.isAuthenticated()) {
-            document.getElementById('profileName').innerText = 'Guest User';
-            document.getElementById('profileInitial').innerText = 'G';
+            window.location.href = 'login/login.html';
             return;
         }
-        document.getElementById('profileName').innerText = this.auth.user.name;
-        document.getElementById('profileInitial').innerText = this.auth.user.name.charAt(0).toUpperCase();
-        if (this.auth.user.is_verified) {
-            document.getElementById('profileVerified').innerHTML = '<span class="verified-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>';
+
+        // Update static info
+        const user = this.auth.user;
+        const initial = user.name.charAt(0).toUpperCase();
+        
+        const dashInitial = document.getElementById('dashboardInitial');
+        const dashName = document.getElementById('dashboardName');
+        const dashEmail = document.getElementById('dashboardEmail');
+        if (dashInitial) dashInitial.innerText = initial;
+        if (dashName) dashName.innerText = user.name;
+        if (dashEmail) dashEmail.innerText = user.email;
+        
+        // Update account section
+        const accName = document.getElementById('accountName');
+        const accEmail = document.getElementById('accountEmail');
+        const accPhone = document.getElementById('accountPhone');
+        if (accName) accName.innerText = user.name;
+        if (accEmail) accEmail.innerText = user.email;
+        if (accPhone) accPhone.innerText = user.phone || 'Not provided';
+
+        // Reset tabs
+        this.switchDashboardTab('impact');
+        
+        // Open modal
+        modal.classList.add('active');
+
+        // Fetch stats & details
+        this.fetchProfileStats();
+    }
+
+    async fetchProfileStats() {
+        try {
+            console.log('📊 Fetching detailed dashboard stats...');
+            const res = await fetch(`${API_BASE}/api/profile/stats/${this.auth.user.id}`, {
+                headers: this.auth.getAuthHeader()
+            });
+            const data = await res.json();
+            if (res.ok) {
+                // Update Counts
+                const idMap = {
+                    'dashStatReports': data.counts.reports,
+                    'dashStatSightings': data.counts.sightings,
+                    'dashStatStories': data.counts.stories,
+                    'dashStatMissions': data.counts.missions
+                };
+                Object.entries(idMap).forEach(([id, val]) => {
+                    const el = document.getElementById(id);
+                    if (el) el.innerText = val;
+                });
+
+                // Render Lists
+                this.renderDashboardList('reports', data.details.reports, 'dashboardReportsList', 'assignment', 'No reports filed yet.', 'START A REPORT', 'eco-reporting');
+                this.renderDashboardList('sightings', data.details.sightings, 'dashboardSightingsList', 'visibility', 'No sightings logged.', 'Log a Sighting', 'eco-reporting');
+                this.renderDashboardList('stories', data.details.stories, 'dashboardStoriesList', 'auto_stories', 'No stories shared.', 'Tell a Story', 'eco-reporting');
+                this.renderDashboardList('missions', data.details.missions, 'dashboardMissionsList', 'groups', 'No missions joined.', 'Browse Missions', 'volunteer');
+
+                // Fetch and Render Interactions (Comments)
+                this.fetchDashboardComments();
+            }
+        } catch (err) { console.error('Stats fetch error:', err); }
+    }
+
+    async fetchDashboardComments() {
+        try {
+            const listEl = document.getElementById('dashboardCommentsList');
+            const countEl = document.getElementById('dashStatComments');
+            if (!listEl) return;
+            
+            const response = await fetch(`${API_BASE}/api/social/user-comments/${this.auth.user.id}`, {
+                headers: this.auth.getAuthHeader()
+            });
+            const data = await response.json();
+            
+            if (response.ok) {
+                if (countEl) countEl.innerText = data.length || 0;
+                if (!data || data.length === 0) {
+                    listEl.innerHTML = `
+                        <div class="bg-card-light dark:bg-card-dark border border-dashed border-slate-300 dark:border-emerald-900/50 rounded-2xl p-8 flex flex-col items-center justify-center text-center">
+                            <div class="w-12 h-12 rounded-full bg-slate-100 dark:bg-emerald-950/50 flex items-center justify-center mb-3">
+                                <span class="material-icons-round text-slate-400 dark:text-emerald-800">forum</span>
+                            </div>
+                            <p class="text-sm font-medium text-slate-500 dark:text-emerald-700/70">No interactions yet.</p>
+                        </div>
+                    `;
+                } else {
+                    listEl.innerHTML = data.slice(0, 5).map(item => {
+                        const isOwn = item.user_id === this.auth.user.id;
+                        const icon = isOwn ? 'chat_bubble_outline' : 'reply';
+                        const label = isOwn ? 'You commented' : `${item.users?.name || 'Someone'} replied to you`;
+                        
+                        return `
+                            <div class="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-slate-100 dark:border-emerald-900/30 shadow-sm">
+                                <div class="flex items-start gap-3">
+                                    <div class="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center flex-shrink-0">
+                                        <span class="material-icons-round text-primary text-sm">${icon}</span>
+                                    </div>
+                                    <div class="flex-1">
+                                        <p class="text-xs font-bold text-slate-400 dark:text-emerald-700/80 uppercase tracking-wider">${label}</p>
+                                        <p class="text-sm text-slate-700 dark:text-slate-200 mt-1 line-clamp-2">${item.text}</p>
+                                        <p class="text-[10px] text-slate-400 mt-1">${new Date(item.created_at).toLocaleDateString()}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
+        } catch (err) { console.error('Comments fetch error:', err); }
+    }
+
+    renderDashboardList(type, items, containerId, icon, emptyMsg, ctaText, scrollTarget) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        if (!items || items.length === 0) {
+            container.innerHTML = `
+                <div class="bg-card-light dark:bg-card-dark border border-dashed border-slate-300 dark:border-emerald-900/50 rounded-2xl p-8 flex flex-col items-center justify-center text-center">
+                    <div class="w-12 h-12 rounded-full bg-slate-100 dark:bg-emerald-950/50 flex items-center justify-center mb-3">
+                        <span class="material-icons-round text-slate-400 dark:text-emerald-800">${icon}</span>
+                    </div>
+                    <p class="text-sm font-medium text-slate-500 dark:text-emerald-700/70">${emptyMsg}</p>
+                    <button class="mt-3 text-xs font-bold text-primary px-4 py-2 rounded-full bg-emerald-50 dark:bg-emerald-950/40" onclick="window.app.scrollToSection('${scrollTarget}'); window.app.closeModal();">${ctaText}</button>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = items.slice(0, 3).map(item => {
+            const title = item.location || item.title || (item.missions ? item.missions.title : (item.species_name || 'Contribution'));
+            const sub = item.description || (item.missions ? item.missions.location : '');
+            const date = new Date(item.created_at).toLocaleDateString();
+            const status = item.status || (type === 'missions' ? 'Joined' : 'Active');
+            const statusColor = status === 'Active' || status === 'Joined' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500';
+
+            return `
+                <div class="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-slate-100 dark:border-emerald-900/30 shadow-sm flex items-center justify-between">
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <div class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-emerald-950/30 flex items-center justify-center flex-shrink-0">
+                            <span class="material-icons-round text-slate-400 dark:text-emerald-800 text-xl">${icon}</span>
+                        </div>
+                        <div class="overflow-hidden">
+                            <h4 class="text-sm font-bold text-slate-900 dark:text-white truncate">${title}</h4>
+                            <p class="text-xs text-slate-500 dark:text-emerald-700/70 truncate">${sub || date}</p>
+                        </div>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-md ${statusColor} uppercase tracking-wider">${status}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    async fetchNotifications() {
+        try {
+            const listEl = document.getElementById('dashboardAlertsList');
+            const res = await fetch(`${API_BASE}/api/notifications`, {
+                headers: this.auth.getAuthHeader()
+            });
+            const data = await res.json();
+            
+            if (res.ok) {
+                if (listEl) {
+                    if (data.length === 0) {
+                        listEl.innerHTML = '<p class="text-center text-slate-500 py-10">No new alerts.</p>';
+                    } else {
+                        listEl.innerHTML = data.map(notif => `
+                            <div class="notif-item-dash p-4 bg-white dark:bg-emerald-950/20 rounded-2xl border ${notif.is_read ? 'border-slate-100' : 'border-primary/30 bg-emerald-50/30'}">
+                                <p class="text-sm text-slate-900 dark:text-slate-100"><b>${notif.actor?.name || 'Someone'}</b> ${notif.text || (notif.action_type === 'like' ? 'liked your item' : 'commented on your item')}</p>
+                                <p class="text-[10px] text-slate-400 mt-1">${new Date(notif.created_at).toLocaleString()}</p>
+                            </div>
+                        `).join('');
+                    }
+                }
+                
+                // Old notification list if it exists
+                const notificationList = document.getElementById('notificationList');
+                if (notificationList) {
+                    if (data.length > 0) {
+                        notificationList.innerHTML = data.map(n => `
+                            <div class="notif-item ${n.is_read ? '' : 'unread'}">
+                                ${n.is_read ? '' : '<div class="notif-dot"></div>'}
+                                <div class="notif-content">
+                                    <b>${n.actor?.name || 'Someone'}</b> ${n.action_type === 'like' ? 'liked' : 'commented on'} your ${n.item_type || 'post'}.
+                                    <br><small>${new Date(n.created_at).toLocaleString()}</small>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        notificationList.innerHTML = '<p class="empty-msg">No alerts yet</p>';
+                    }
+                }
+            }
+        } catch (err) { console.error('Alerts fetch error:', err); }
+    }
+
+    async checkNotifications() {
+        try {
+            const res = await fetch(`${API_BASE}/api/notifications`, {
+                headers: this.auth.getAuthHeader()
+            });
+            const data = await res.json();
+            if (res.ok) {
+                const unread = data.filter(n => !n.is_read);
+                const badge = document.getElementById('profileNotifBadge');
+                const tabBadge = document.getElementById('unreadCount');
+                
+                if (unread.length > 0) {
+                    if (badge) badge.style.display = 'block';
+                    if (tabBadge) {
+                        tabBadge.style.display = 'inline-block';
+                        tabBadge.innerText = unread.length;
+                    }
+                } else {
+                    if (badge) badge.style.display = 'none';
+                    if (tabBadge) tabBadge.style.display = 'none';
+                }
+            }
+        } catch (err) { console.error('Notif check error:', err); }
+    }
+
+    async markNotificationsRead() {
+        try {
+            const res = await fetch(`${API_BASE}/api/notifications/read`, {
+                method: 'POST',
+                headers: this.auth.getAuthHeader()
+            });
+            if (res.ok) {
+                this.fetchNotifications();
+                this.checkNotifications();
+                this.showToast('All notifications marked as read', 'success');
+            }
+        } catch (err) { console.error('Mark read error:', err); }
+    }
+
+    async handleProfileUpdate(e) {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const name = formData.get('name');
+        const phone = formData.get('phone');
+
+        try {
+            const res = await fetch(`${API_BASE}/api/profile/update`, {
+                method: 'PUT',
+                headers: {
+                    ...this.auth.getAuthHeader(),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name, phone })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                this.auth.updateUser(data.user);
+                this.showToast('Profile updated successfully!', 'success');
+                // Update UI elements
+                const dashName = document.getElementById('dashboardName');
+                if (dashName) dashName.innerText = data.user.name;
+                const accName = document.getElementById('accountName');
+                if (accName) accName.innerText = data.user.name;
+            } else {
+                throw new Error(data.error);
+            }
+        } catch (err) {
+            this.showToast(err.message, 'error');
         }
     }
 
     switchTab(tabId) {
         // Toggle active states
         document.querySelectorAll('.bottom-nav-item').forEach(i => i.classList.remove('active'));
-        document.querySelector(`.bottom-nav-item[data-tab="${tabId}"]`)?.classList.add('active');
+        const activeItem = document.querySelector(`.bottom-nav-item[data-tab="${tabId}"]`);
+        if (activeItem) activeItem.classList.add('active');
 
         // Map section names to section IDs
         const sections = {
             'home': 'home',
             'reports': 'eco-reporting',
-            'map': 'heatmap',
+            'heatmap': 'heatmap',
             'missions': 'volunteer',
-            'sightings': 'eco-reporting' // Redirection to reports with tab
+            'sightings': 'eco-reporting',
+            'stories': 'eco-reporting'
         };
 
-        if (tabId === 'sightings') {
-            this.switchFeed('sightings');
-        } else if (tabId === 'reports') {
-            this.switchFeed('reports');
+        if (tabId === 'settings') {
+            this.openProfileModal();
+            return;
+        }
+
+        if (tabId === 'sightings' || tabId === 'reports' || tabId === 'stories') {
+            this.switchFeed(tabId);
+            this.scrollToSection('reportsFeed');
+            return;
         }
 
         const target = sections[tabId];
         if (target) {
             this.scrollToSection(target);
         }
+    }
+
+    switchFeed(feedType) {
+        // Toggle active tab UI
+        document.querySelectorAll('.feed-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.feed === feedType);
+        });
+
+        // Toggle active content UI
+        document.querySelectorAll('.feed-content').forEach(content => {
+            content.classList.toggle('active', content.id === `${feedType}Feed`);
+        });
+
+        // Refresh dynamic content if needed
+        if (feedType === 'stories' && window.loadStories) window.loadStories();
+        if (feedType === 'sightings' && window.loadSightings) window.loadSightings();
     }
 
     async openUserProfile(userId) {
@@ -1221,7 +1594,7 @@ class GoaEcoGuard {
                     <button class="close-modal" onclick="this.closest('.modal').remove()">&times;</button>
                     <div class="profile-banner">
                         <div class="profile-pic">${data.user.name.charAt(0).toUpperCase()}</div>
-                        <h2>${escapeHtml(data.user.name)} ${data.user.is_verified ? '<span class="verified-icon"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>' : ''}</h2>
+                        <h2>${this.escapeHtml(data.user.name)} ${data.user.is_verified ? '<span class="verified-icon"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></span>' : ''}</h2>
                         <div class="profile-stats">
                             <div class="profile-stat-item"><span class="profile-stat-val">${data.stats.followers}</span><span class="profile-stat-label">Followers</span></div>
                             <div class="profile-stat-item"><span class="profile-stat-val">${data.stats.following}</span><span class="profile-stat-label">Following</span></div>
@@ -1233,8 +1606,8 @@ class GoaEcoGuard {
                         ${data.feed.length ? data.feed.map(item => `
                             <div class="feed-item" style="padding:0.75rem; border-bottom:1px solid rgba(255,255,255,0.05);">
                                 <div style="color:var(--primary); font-size:0.8rem; margin-bottom:0.25rem;">${item.latitude ? 'Report' : 'Sighting'}</div>
-                                <div>${escapeHtml(item.description || item.species_name)}</div>
-                                <div style="font-size:0.75rem; color:var(--muted-foreground); margin-top:0.25rem;">📍 ${escapeHtml(item.location)}</div>
+                                <div>${this.escapeHtml(item.description || item.species_name)}</div>
+                                <div style="font-size:0.75rem; color:var(--muted-foreground); margin-top:0.25rem;">📍 ${this.escapeHtml(item.location)}</div>
                             </div>
                         `).join('') : '<p class="text-center">No impact reports yet.</p>'}
                     </div>
@@ -1656,6 +2029,8 @@ class GoaEcoGuard {
 
     async searchLocation(query) {
         if (!query || query.length < 3) return;
+        const locationStatus = document.getElementById('locationStatus');
+        
         try {
             const response = await fetch(
                 `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ', Goa')}&limit=1`
@@ -1670,6 +2045,19 @@ class GoaEcoGuard {
                 document.getElementById('longitude').value = longitude;
                 
                 this.updateLocalReportMarker(latitude, longitude);
+
+                // Show feedback
+                if (locationStatus) {
+                    locationStatus.textContent = '📍 Location verified via search';
+                    locationStatus.style.display = 'block';
+                    locationStatus.style.color = '#22c55e';
+                }
+            } else {
+                if (locationStatus) {
+                    locationStatus.textContent = 'Searching for coordinates...';
+                    locationStatus.style.display = 'block';
+                    locationStatus.style.color = 'var(--muted-foreground)';
+                }
             }
         } catch (error) {
             console.error('Search error:', error);
@@ -1706,6 +2094,13 @@ class GoaEcoGuard {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    formatReportTime(ts) {
+        if (!ts) return 'Unknown time';
+        const d = new Date(ts);
+        if (isNaN(d.getTime())) return ts;
+        return d.toLocaleString();
     }
 
 

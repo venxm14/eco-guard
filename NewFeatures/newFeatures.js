@@ -149,7 +149,7 @@
       const res = await fetch(`${API}/api/stories?page=${storiesPage}&limit=6`);
       const json = await res.json();
 
-      const grid = document.getElementById('nfStoriesGrid');
+      const grid = document.getElementById('nfStoriesGridMain') || document.getElementById('nfStoriesGrid');
       const loadMoreDiv = document.getElementById('nfLoadMore');
       if (!grid) return;
 
@@ -233,6 +233,7 @@
             </button>
             <button class="social-btn comment-btn" onclick="if(window.app) window.app.toggleComments('${story.id}', 'story', this)">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                <span class="count">${story.comments_count || 0}</span>
             </button>
             <button class="social-btn share-btn" onclick="if(window.app) window.app.handleSocialAction('share', '${story.id}', 'story', this)">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
@@ -241,7 +242,7 @@
         <div class="comment-section-mini" id="comments-${story.id}">
             <div class="comment-list-mini" id="commentList-${story.id}"></div>
             <div class="comment-input-area">
-                <input type="text" placeholder="Post a reply..." onkeydown="if(event.key==='Enter' && window.app) window.app.postComment('${story.id}', 'story', this.value, this)">
+                <input type="text" id="commentInput-${story.id}" placeholder="Post a reply..." onkeydown="if(event.key==='Enter' && window.app) window.app.postComment('${story.id}', 'story', this.value, this)">
             </div>
         </div>
       </div>
@@ -452,7 +453,7 @@
       const res = await fetch(`${API}/api/sightings`);
       const sightings = await res.json();
 
-      const list = document.getElementById('nfSightingsList');
+      const list = document.getElementById('nfSightingsListMain') || document.getElementById('nfSightingsList');
       if (!list) return;
 
       if (!sightings || sightings.length === 0) {
@@ -495,6 +496,7 @@
                 </button>
                 <button class="social-btn comment-btn" onclick="if(window.app) window.app.toggleComments('${s.id}', 'sighting', this)">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                    <span class="count">${s.comments_count || 0}</span>
                 </button>
                 <button class="social-btn share-btn" onclick="if(window.app) window.app.handleSocialAction('share', '${s.id}', 'sighting', this)">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
@@ -503,7 +505,7 @@
               <div class="comment-section-mini" id="comments-${s.id}">
                 <div class="comment-list-mini" id="commentList-${s.id}"></div>
                 <div class="comment-input-area">
-                    <input type="text" placeholder="Post a reply..." onkeydown="if(event.key==='Enter' && window.app) window.app.postComment('${s.id}', 'sighting', this.value, this)">
+                    <input type="text" id="commentInput-${s.id}" placeholder="Post a reply..." onkeydown="if(event.key==='Enter' && window.app) window.app.postComment('${s.id}', 'sighting', this.value, this)">
                 </div>
               </div>
             </div>
@@ -581,6 +583,8 @@
   function initSightingForm() {
     const form = document.getElementById('nfSightingForm');
     const locBtn = document.getElementById('nfGetSightLocation');
+    const sightLocInput = document.getElementById('nfSightLocation');
+    const statusMsg = document.getElementById('nfSightLocStatus');
 
     if (locBtn) {
       locBtn.addEventListener('click', () => {
@@ -588,16 +592,58 @@
           showToast('Geolocation not supported', 'error');
           return;
         }
+        locBtn.textContent = '🔄 Capturing...';
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             document.getElementById('nfSightLat').value = pos.coords.latitude;
             document.getElementById('nfSightLng').value = pos.coords.longitude;
-            document.getElementById('nfSightLocStatus').style.display = 'block';
+            statusMsg.textContent = '✔ Location captured via GPS';
+            statusMsg.style.display = 'block';
+            statusMsg.style.color = '#16a34a';
+            locBtn.textContent = 'Use Current Location';
             showToast('Location captured! ✔', 'success');
           },
-          (err) => showToast('Location access denied', 'error'),
+          (err) => {
+            showToast('Location access denied', 'error');
+            locBtn.textContent = 'Use Current Location';
+          },
           { enableHighAccuracy: true }
         );
+      });
+    }
+
+    // Manual typing geocoding for sightings
+    if (sightLocInput) {
+      let debounce;
+      sightLocInput.addEventListener('input', () => {
+        // Hide GPS button if user types manually
+        if (sightLocInput.value.length > 3) {
+          if (locBtn) locBtn.style.display = 'none';
+        } else if (sightLocInput.value.length === 0) {
+          if (locBtn) locBtn.style.display = 'block';
+        }
+
+        clearTimeout(debounce);
+        debounce = setTimeout(async () => {
+          const query = sightLocInput.value;
+          if (!query || query.length < 3) return;
+
+          try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + ', Goa')}&limit=1`);
+            const data = await res.json();
+            if (data && data.length > 0) {
+              document.getElementById('nfSightLat').value = data[0].lat;
+              document.getElementById('nfSightLng').value = data[0].lon;
+              statusMsg.textContent = '📍 Coordinates found via search';
+              statusMsg.style.display = 'block';
+              statusMsg.style.color = '#22c55e';
+            } else {
+              statusMsg.textContent = 'Searching for location details...';
+              statusMsg.style.display = 'block';
+              statusMsg.style.color = '#6b7280';
+            }
+          } catch (e) { console.error('Geocoding error:', e); }
+        }, 800);
       });
     }
 
@@ -612,14 +658,14 @@
         const lat = document.getElementById('nfSightLat').value;
         const lng = document.getElementById('nfSightLng').value;
         if (!lat || !lng) {
-          showToast('Please capture your location first', 'error');
+          showToast('Please wait for location to be identified', 'error');
           return;
         }
 
         const formData = new FormData();
         formData.append('species_name', document.getElementById('nfSpecies').value);
         formData.append('description', document.getElementById('nfSightDesc').value);
-        formData.append('location', document.getElementById('nfSightLocation').value);
+        formData.append('location', sightLocInput.value);
         formData.append('latitude', lat);
         formData.append('longitude', lng);
 
@@ -638,7 +684,8 @@
 
           showToast('Sighting reported! 🦎', 'success');
           form.reset();
-          document.getElementById('nfSightLocStatus').style.display = 'none';
+          if (statusMsg) statusMsg.style.display = 'none';
+          if (locBtn) locBtn.style.display = 'block';
           loadSightings();
         } catch (err) {
           showToast(err.message, 'error');
@@ -841,5 +888,9 @@
   } else {
     init();
   }
+
+  // Expose to window for tab switching logic
+  window.loadStories = loadStories;
+  window.loadSightings = loadSightings;
 
 })();

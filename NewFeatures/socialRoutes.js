@@ -38,12 +38,12 @@ router.post('/api/social/like', authenticateToken, async (req, res) => {
     const user_id = req.user.userId;
 
     // 1. Check if already liked
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseAdmin
       .from('social_likes')
       .select('id')
-      .eq('user_id', user_id)
-      .eq('item_id', item_id)
-      .eq('item_type', item_type)
+      .filter('user_id', 'eq', user_id)
+      .filter('item_id', 'eq', item_id.toString()) // cast to string for text-based ID column
+      .filter('item_type', 'eq', item_type)
       .single();
 
     if (existing) {
@@ -52,21 +52,40 @@ router.post('/api/social/like', authenticateToken, async (req, res) => {
       
       // Decrement count in target table
       const tableName = item_type === 'report' ? 'eco_reports' : (item_type === 'sighting' ? 'eco_sightings' : 'eco_stories');
-      const { data: item } = await supabase.from(tableName).select('likes_count').eq('id', item_id).single();
-      await supabaseAdmin.from(tableName).update({ likes_count: Math.max(0, (item.likes_count || 1) - 1) }).eq('id', item_id);
+      const { data: item } = await supabaseAdmin.from(tableName).select('likes_count').eq('id', item_id).single();
+      const newCount = Math.max(0, (item?.likes_count || 1) - 1);
+      await supabaseAdmin.from(tableName).update({ likes_count: newCount }).eq('id', item_id);
 
-      return res.json({ success: true, action: 'unliked', likes_count: Math.max(0, (item.likes_count || 1) - 1) });
+      return res.json({ success: true, action: 'unliked', likes_count: newCount });
     }
 
     // Like
-    await supabaseAdmin.from('social_likes').insert([{ user_id, item_id, item_type }]);
+    const { error: insertErr } = await supabaseAdmin.from('social_likes').insert([{ 
+        user_id, 
+        item_id: item_id.toString(), // ensure string storage for flexibility
+        item_type 
+    }]);
+
+    if (insertErr) throw insertErr;
     
     // Increment count
     const tableName = item_type === 'report' ? 'eco_reports' : (item_type === 'sighting' ? 'eco_sightings' : 'eco_stories');
-    const { data: item } = await supabase.from(tableName).select('likes_count').eq('id', item_id).single();
-    await supabaseAdmin.from(tableName).update({ likes_count: (item.likes_count || 0) + 1 }).eq('id', item_id);
+    const { data: item } = await supabaseAdmin.from(tableName).select('likes_count, user_id').eq('id', item_id).single();
+    const newCount = (item?.likes_count || 0) + 1;
+    await supabaseAdmin.from(tableName).update({ likes_count: newCount }).eq('id', item_id);
 
-    res.json({ success: true, action: 'liked', likes_count: (item.likes_count || 0) + 1 });
+    // 🚀 TRIGGER NOTIFICATION
+    if (item && item.user_id && item.user_id !== user_id) {
+        await supabaseAdmin.from('social_notifications').insert([{
+            recipient_id: item.user_id,
+            actor_id: user_id,
+            item_id: item_id,
+            item_type: item_type,
+            action_type: 'like'
+        }]);
+    }
+
+    res.json({ success: true, action: 'liked', likes_count: newCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -79,11 +98,11 @@ router.post('/api/social/like', authenticateToken, async (req, res) => {
 router.get('/api/social/comments/:type/:id', async (req, res) => {
   try {
     const { type, id } = req.params;
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('social_comments')
       .select('*, users!user_id(name)')
-      .eq('item_id', id)
-      .eq('item_type', type)
+      .filter('item_id', 'eq', id.toString())
+      .filter('item_type', 'eq', type)
       .order('created_at', { ascending: true });
 
     if (error) throw error;
@@ -100,14 +119,56 @@ router.post('/api/social/comment', authenticateToken, async (req, res) => {
 
     const { data, error } = await supabaseAdmin
       .from('social_comments')
-      .insert([{ user_id, item_id, item_type, text, parent_id }])
+      .insert([{ 
+          user_id, 
+          item_id: item_id.toString(), // Store as string to handle Int/UUID
+          item_type, 
+          text, 
+          parent_id 
+      }])
       .select('*, users!user_id(name)')
       .single();
 
     if (error) throw error;
+
+    // 🚀 INCREMENT COMMENT COUNT ON TARGET TABLE
+    try {
+        const tableName = item_type === 'report' ? 'eco_reports' : (item_type === 'sighting' ? 'eco_sightings' : 'eco_stories');
+        
+        // Use a generic increment function if available, else manual update
+        const { error: updateErr } = await supabaseAdmin.rpc('increment_social_count', { 
+            t_name: tableName, 
+            c_name: 'comments_count',
+            row_id: item_id 
+        });
+
+        if (updateErr) {
+            // Manual fallback if RPC fails
+            const { data: current } = await supabase.from(tableName).select('comments_count').eq('id', item_id).single();
+            const newCount = (current?.comments_count || 0) + 1;
+            await supabaseAdmin.from(tableName).update({ comments_count: newCount }).eq('id', item_id);
+        }
+
+        // Trigger Notification
+        const { data: item } = await supabase.from(tableName).select('user_id').eq('id', item_id).single();
+        if (item && item.user_id && item.user_id !== user_id) {
+            await supabaseAdmin.from('social_notifications').insert([{
+                recipient_id: item.user_id,
+                actor_id: user_id,
+                item_id: item_id,
+                item_type: item_type,
+                action_type: 'comment'
+            }]);
+        }
+    } catch (bgErr) { 
+        console.error('Comment background task error:', bgErr); 
+        // We don't fail the request if background tasks fail
+    }
+
     res.json({ success: true, data });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('Comment Post Error:', err);
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
@@ -188,6 +249,66 @@ router.post('/api/social/repost', authenticateToken, async (req, res) => {
 
     if (error) throw error;
     res.json({ success: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ===============================
+   6. USER COMMENTS & INTERACTIONS
+   ================================ */
+
+router.get('/api/social/user-comments/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // 1. Fetch comments authored by the user
+    const { data: authored } = await supabaseAdmin
+      .from('social_comments')
+      .select('*, users!user_id(name)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    // 2. Fetch comments on items owned by the user (Replies)
+    // First find item IDs owned by user across different tables
+    const { data: reports } = await supabaseAdmin.from('eco_reports').select('id').eq('user_id', userId);
+    const { data: sightings } = await supabaseAdmin.from('eco_sightings').select('id').eq('user_id', userId);
+    const { data: stories } = await supabaseAdmin.from('eco_stories').select('id').eq('user_id', userId);
+    
+    const myItemIds = [
+      ...(reports || []).map(r => r.id.toString()),
+      ...(sightings || []).map(s => s.id.toString()),
+      ...(stories || []).map(st => st.id.toString())
+    ];
+
+    let replies = [];
+    if (myItemIds.length > 0) {
+      const { data: repliesData } = await supabaseAdmin
+        .from('social_comments')
+        .select('*, users!user_id(name)')
+        .in('item_id', myItemIds)
+        .neq('user_id', userId) // exclude own comments on own posts
+        .order('created_at', { ascending: false });
+      replies = repliesData || [];
+    }
+
+    // 3. Simple Mock for "Tags/Mentions" logic (could be expanded in future)
+    // For now we look for notifications of type 'comment' for this user
+    const { data: mentions } = await supabaseAdmin
+      .from('social_notifications')
+      .select('*, actor:actor_id(name)')
+      .eq('recipient_id', userId)
+      .eq('action_type', 'comment')
+      .order('created_at', { ascending: false });
+
+    // Combine and label
+    const unified = [
+      ...(authored || []).map(c => ({ ...c, type: 'authored' })),
+      ...(replies).map(r => ({ ...r, type: 'reply' })),
+      ...(mentions || []).map(m => ({ ...m, type: 'notification', text: `Replying to your ${m.item_type}` }))
+    ].sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+
+    res.json(unified);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

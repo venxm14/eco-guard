@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS eco_stories (
     before_image TEXT,   -- Supabase Storage public URL
     after_image TEXT,    -- Supabase Storage public URL
     likes_count INT DEFAULT 0,
+    comments_count INT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -27,6 +28,8 @@ CREATE TABLE IF NOT EXISTS eco_sightings (
     location TEXT,
     image_url TEXT,       -- Supabase Storage public URL
     status TEXT DEFAULT 'verified',
+    likes_count INT DEFAULT 0,
+    comments_count INT DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

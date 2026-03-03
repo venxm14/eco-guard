@@ -62,10 +62,18 @@ To solve the issue of the Biodiversity Tracker being hard to reach on mobile, I 
 #### [MODIFY] [script.js](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/script.js)
 - Implement `switchFeed(type)` logic to toggle between reporting, sightings, and stories.
 - Handle bottom nav redirection to the specific feed tab.
-- Integrate the `NewFeatures` sightings list into the main feed container when the "Sightings" tab is chosen.
+- **Location Optimization**:
+  - Add logic to hide `getLocationBtn` when user starts typing manually.
+  - Show "Location found via search" feedback when manual typing geocodes successfully.
+
+#### [MODIFY] [socialStyles.css](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/socialStyles.css)
+- Implement media queries for responsive navigation (Mobile vs Desktop).
+- Add styles for location feedback status (e.g., `.location-found`).
 
 #### [MODIFY] [NewFeatures/newFeatures.js](file:///c:/Users/Sarvesh/Documents/final_project/Goa%20Eco-Guard/NewFeatures/newFeatures.js)
-- Adjust visibility logic so Sightings can exist as a tab instead of just a standalone section.
+- Implement `searchSightingLocation` to geocode manual input in the Biodiversity Tracker.
+- Allow form submission if coordinates are found via manual typing (removing the hard requirement to click "Use Current Location").
+- Hide `nfGetSightLocation` button when user scales manual input.
 
 ## Verification Plan
 
