@@ -1318,22 +1318,59 @@ scrollToComment(itemId, parentType) {
 
         if (action === 'like') {
             try {
+                // Immediate visual feedback
+                const isCurrentlyLiked = btn.classList.contains('liked');
+                btn.style.pointerEvents = 'none'; // Prevent double-click
+
+                // Trigger animation immediately
+                if (!isCurrentlyLiked) {
+                    btn.classList.add('liked');
+                    // Force reflow to restart animation
+                    void btn.offsetWidth;
+                } else {
+                    btn.classList.remove('liked');
+                }
+
                 const res = await this.auth.apiFetch('/api/social/like', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ item_id: itemId, item_type: itemType })
                 });
                 const data = await res.json();
+
                 if (data.success) {
                     const countSpan = btn.querySelector('.count');
-                    if (countSpan) countSpan.innerText = data.likes_count;
-                    btn.classList.toggle('liked', data.action === 'liked');
-                    
-                    if (data.action === 'liked') {
-                        this.showToast('Impact liked! ❤️', 'success');
+                    if (countSpan) {
+                        countSpan.innerText = data.likes_count;
+                        // Animate count change
+                        countSpan.style.transform = 'scale(1.3)';
+                        setTimeout(() => {
+                            countSpan.style.transform = 'scale(1)';
+                        }, 200);
                     }
+
+                    // Ensure final state matches server response
+                    btn.classList.toggle('liked', data.action === 'liked');
+
+                    if (data.action === 'liked') {
+                        this.showToast('Impact liked!', 'success');
+                    }
+                } else {
+                    // Revert on error
+                    btn.classList.toggle('liked', isCurrentlyLiked);
                 }
-            } catch (err) { console.error('Like error:', err); }
+
+                // Re-enable button after animation
+                setTimeout(() => {
+                    btn.style.pointerEvents = 'auto';
+                }, 600);
+
+            } catch (err) {
+                console.error('Like error:', err);
+                // Revert on error
+                btn.classList.toggle('liked');
+                btn.style.pointerEvents = 'auto';
+            }
         }
 
         if (action === 'share') {

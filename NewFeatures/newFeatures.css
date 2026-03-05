@@ -261,10 +261,30 @@
   color: var(--foreground, #111827);
 }
 
-.nf-like-btn:hover, .nf-like-btn.liked {
+.nf-like-btn:hover {
   background: #fef2f2;
   border-color: #fca5a5;
   color: #ef4444;
+}
+
+.nf-like-btn.liked {
+  background: #fef2f2;
+  border-color: #ef4444;
+  color: #ef4444;
+  animation: nfLikePopIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+/* Animation for NewFeatures like button */
+@keyframes nfLikePopIn {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .nf-story-time {
