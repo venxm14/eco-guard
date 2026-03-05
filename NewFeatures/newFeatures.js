@@ -147,30 +147,41 @@
   let allStoriesLoaded = false;
 
   // Load stories for both dedicated section AND feed tabs
+// In newFeatures.js - replace the loadStories function
+
 async function loadStories(target = 'both') {
   try {
-    console.log('📖 Loading stories from simple endpoint...');
+    console.log('📖 Loading stories...');
     
-    // Use the new simple endpoint
-    const res = await fetch(`${API}/api/simple-stories`);
+    // Use the main stories endpoint, not simple-stories
+    const res = await fetch(`${API}/api/stories?page=${storiesPage}&limit=10`);
     
     if (!res.ok) {
       console.error('❌ Stories API returned error:', res.status);
       return;
     }
     
-    const stories = await res.json();
-    console.log('📊 Stories response:', stories);
+    const data = await res.json();
+    const stories = data.stories || [];
+    console.log('📊 Stories loaded:', stories.length);
 
     // Load into dedicated stories grid
     if (target === 'both' || target === 'dedicated') {
       const dedicatedGrid = document.getElementById('nfStoriesGrid');
       if (dedicatedGrid) {
         if (!stories || stories.length === 0) {
-          dedicatedGrid.innerHTML = getStoriesEmptyState();
+          dedicatedGrid.innerHTML = `
+            <div class="nf-empty-state" style="grid-column: 1 / -1; text-align: center; padding: 60px 20px;">
+              <div class="nf-empty-icon" style="font-size: 48px; margin-bottom: 16px;">📖</div>
+              <h3 style="margin-bottom: 8px;">No stories yet</h3>
+              <p style="color: var(--muted-foreground); margin-bottom: 20px;">Be the first to share your eco-impact story!</p>
+              <button class="nf-btn nf-btn-primary" onclick="document.getElementById('nfCreateStoryBtn')?.click()">
+                Share Your Story
+              </button>
+            </div>`;
         } else {
           dedicatedGrid.innerHTML = stories.map((story, index) => 
-            buildSimpleStoryCard(story, index)
+            buildStoryCard(story, index)
           ).join('');
         }
       }
@@ -181,30 +192,47 @@ async function loadStories(target = 'both') {
       const feedGrid = document.getElementById('nfStoriesGridMain');
       if (feedGrid) {
         if (!stories || stories.length === 0) {
-          feedGrid.innerHTML = getFeedStoriesEmptyState();
+          feedGrid.innerHTML = `
+            <div class="nf-empty-state" style="text-align: center; padding: 40px 20px;">
+              <div class="nf-empty-icon" style="font-size: 48px; margin-bottom: 16px;">📖</div>
+              <h4 style="margin-bottom: 8px;">No stories yet</h4>
+              <p style="color: var(--muted-foreground);">Be the first to share your eco-impact story!</p>
+            </div>`;
         } else {
           feedGrid.innerHTML = stories.slice(0, 3).map((story, index) => 
-            buildSimpleStoryCard(story, index)
+            buildStoryCard(story, index)
           ).join('');
         }
       }
     }
 
-    console.log(`✅ Loaded ${stories?.length || 0} stories`);
+    // Initialize compare sliders for before/after images
+    setTimeout(initCompareSliders, 500);
+    
+    console.log(`✅ Loaded ${stories.length} stories`);
   } catch (err) {
     console.error('❌ Failed to load stories:', err);
   }
 }
+// In newFeatures.js - add this function if missing
 
-// Simplified story card builder without joins
-function buildSimpleStoryCard(story, index) {
-  const userName = 'Eco-Warrior'; // Default name since we can't join
-  const initial = 'U';
+function buildStoryCard(story, index) {
+  const userName = story.users?.name || 'Eco-Warrior';
+  const initial = userName.charAt(0).toUpperCase();
   const timeAgo = getTimeAgo(story.created_at);
 
   let imageSection = '';
   if (story.before_image && story.after_image) {
-    imageSection = `<div class="nf-image-compare" data-compare>...</div>`;
+    imageSection = `
+      <div class="nf-image-compare" data-compare>
+        <img src="${story.before_image}" alt="Before" class="nf-img-before">
+        <img src="${story.after_image}" alt="After" class="nf-img-after">
+        <div class="nf-compare-divider"></div>
+        <div class="nf-compare-labels">
+          <span class="nf-compare-label before">Before</span>
+          <span class="nf-compare-label after">After</span>
+        </div>
+      </div>`;
   } else if (story.after_image) {
     imageSection = `<img src="${story.after_image}" alt="Story" class="nf-story-single-image">`;
   } else if (story.before_image) {
@@ -212,18 +240,20 @@ function buildSimpleStoryCard(story, index) {
   }
 
   return `
-    <div class="nf-story-card" data-story-id="${story.id}">
+    <div class="nf-story-card" style="animation-delay:${index * 0.08}s" data-story-id="${story.id}">
       ${imageSection}
       <div class="nf-story-body">
         <div class="nf-story-meta">
-          <div class="nf-story-avatar">${initial}</div>
+          <div class="nf-story-avatar" onclick="if(window.app) window.app.openUserProfile('${story.user_id}')">${initial}</div>
           <div class="nf-story-user-info">
-            <span class="nf-story-username">${userName}</span>
+            <span class="nf-story-username">${escapeHTML(userName)}</span>
+            ${story.users?.is_verified ? `<span class="verified-icon">✓</span>` : ''}
             <span class="nf-story-time">${timeAgo}</span>
           </div>
         </div>
         <div class="nf-story-title">${escapeHTML(story.title)}</div>
-        ${story.description ? `<div class="nf-story-desc">${escapeHTML(story.description)}</div>` : ''}        
+        ${story.description ? `<div class="nf-story-desc">${escapeHTML(story.description)}</div>` : ''}
+        
         <div class="social-actions" style="margin-top:12px; padding-top:8px;">
             <button class="social-btn like-btn ${isStoryLiked(story.id) ? 'liked' : ''}" onclick="if(window.app) window.app.handleSocialAction('like', '${story.id}', 'story', this)">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
@@ -245,8 +275,63 @@ function buildSimpleStoryCard(story, index) {
         </div>
       </div>
     </div>`;
-  }
+}
+// Simplified story card builder without joins
+// In newFeatures.js - update buildSimpleStoryCard function
 
+function buildSimpleStoryCard(story, index) {
+    const userName = 'Eco-Warrior';
+    const initial = 'U';
+    const timeAgo = getTimeAgo(story.created_at);
+    
+    // Check if story is liked (from localStorage)
+    const likedStories = getLikedStories(); // Your existing function
+    const isLiked = likedStories.includes(String(story.id));
+
+    let imageSection = '';
+    if (story.before_image && story.after_image) {
+        imageSection = `<div class="nf-image-compare" data-compare>...</div>`;
+    } else if (story.after_image) {
+        imageSection = `<img src="${story.after_image}" alt="Story" class="nf-story-single-image">`;
+    } else if (story.before_image) {
+        imageSection = `<img src="${story.before_image}" alt="Story" class="nf-story-single-image">`;
+    }
+
+    return `
+        <div class="nf-story-card" data-story-id="${story.id}">
+            ${imageSection}
+            <div class="nf-story-body">
+                <div class="nf-story-meta">
+                    <div class="nf-story-avatar">${initial}</div>
+                    <div class="nf-story-user-info">
+                        <span class="nf-story-username">${userName}</span>
+                        <span class="nf-story-time">${timeAgo}</span>
+                    </div>
+                </div>
+                <div class="nf-story-title">${escapeHTML(story.title)}</div>
+                ${story.description ? `<div class="nf-story-desc">${escapeHTML(story.description)}</div>` : ''}        
+                <div class="social-actions" style="margin-top:12px; padding-top:8px;">
+                    <button class="social-btn like-btn ${isLiked ? 'liked' : ''}" onclick="window.app.handleSocialAction('like', '${story.id}', 'story', this)">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                        <span class="count">${story.likes_count || 0}</span>
+                    </button>
+                    <button class="social-btn comment-btn" onclick="window.app.toggleComments('${story.id}', 'story', this)">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                        <span class="count">${story.comments_count || 0}</span>
+                    </button>
+                    <button class="social-btn share-btn" onclick="window.app.handleSocialAction('share', '${story.id}', 'story', this)">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                    </button>
+                </div>
+                <div class="comment-section-mini" id="comments-${story.id}">
+                    <div class="comment-list-mini" id="commentList-${story.id}"></div>
+                    <div class="comment-input-area">
+                        <input type="text" id="commentInput-${story.id}" placeholder="Post a reply..." onkeydown="if(event.key==='Enter' && window.app) window.app.postComment('${story.id}', 'story', this.value, this)">
+                    </div>
+                </div>
+            </div>
+        </div>`;
+}
   // Before/After image comparison slider
   function initCompareSliders() {
     document.querySelectorAll('[data-compare]').forEach(container => {

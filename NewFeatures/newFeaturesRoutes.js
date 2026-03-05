@@ -59,33 +59,16 @@ async function uploadToSupabase(buffer, folder, width = 1200, height = 800) {
 // GET /api/stories — paginated story feed
 // In newFeaturesRoutes.js - update the GET /api/stories endpoint
 
+// In newFeaturesRoutes.js - ensure this endpoint exists
 router.get('/api/stories', async (req, res) => {
   try {
-    console.log('📖 Fetching stories with admin client...');
+    console.log('📖 Fetching stories...');
     
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
 
-    // First, get the stories without the join to see raw data
-    const { data: rawData, error: rawError } = await supabaseAdmin
-      .from('eco_stories')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    if (rawError) {
-      console.error('❌ Error fetching raw stories:', rawError);
-      return res.status(500).json({ error: rawError.message });
-    }
-
-    console.log(`✅ Raw stories fetched: ${rawData?.length || 0}`);
-    if (rawData && rawData.length > 0) {
-      console.log('Sample raw story - user_id:', rawData[0].user_id);
-    }
-
-    // Now try with join for user data
-    const { data: joinedData, error: joinedError } = await supabaseAdmin
+    const { data, error, count } = await supabaseAdmin
       .from('eco_stories')
       .select(`
         *,
@@ -95,37 +78,26 @@ router.get('/api/stories', async (req, res) => {
           email,
           is_verified
         )
-      `)
+      `, { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    // Get total count
-    const { count, error: countError } = await supabaseAdmin
-      .from('eco_stories')
-      .select('*', { count: 'exact', head: true });
-
-    // Use raw data if join fails, otherwise use joined data
-    let stories = rawData || [];
-    
-    // If join succeeded, use that data
-    if (!joinedError && joinedData) {
-      stories = joinedData;
+    if (error) {
+      console.error('❌ Error fetching stories:', error);
+      return res.status(500).json({ 
+        error: error.message,
+        stories: [], 
+        total: 0 
+      });
     }
 
+    console.log(`✅ Successfully fetched ${data?.length || 0} stories`);
+    
     res.json({
-      stories: stories,
+      stories: data || [],
       total: count || 0,
       page,
-      totalPages: Math.ceil((count || 0) / limit),
-      debug: {
-        raw_count: rawData?.length || 0,
-        joined_count: joinedData?.length || 0,
-        raw_sample: rawData?.[0] ? {
-          id: rawData[0].id,
-          user_id: rawData[0].user_id,
-          title: rawData[0].title
-        } : null
-      }
+      totalPages: Math.ceil((count || 0) / limit)
     });
   } catch (err) {
     console.error('❌ Stories fetch error:', err);

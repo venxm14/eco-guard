@@ -5252,3 +5252,78 @@ input, textarea, select {
     transform: translateX(4px);
     box-shadow: 0 4px 12px rgba(34, 197, 94, 0.15);
 }
+/* Profile item highlight animation */
+.profile-highlight {
+    animation: profilePulse 1.5s ease;
+    box-shadow: 0 0 0 3px var(--primary), 0 4px 12px rgba(34, 197, 94, 0.3);
+    transition: all 0.3s ease;
+}
+
+@keyframes profilePulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgba(34, 197, 94, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+    }
+}
+
+/* Profile clickable items */
+.profile-clickable-item {
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.profile-clickable-item:hover {
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(34, 197, 94, 0.15);
+}
+/* Comment reply styles */
+.profile-comment-item {
+    transition: all 0.2s ease;
+}
+
+.profile-comment-item:hover {
+    transform: translateX(2px);
+}
+
+.reply-toggle-btn {
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+}
+
+.reply-toggle-btn:hover {
+    opacity: 1;
+}
+
+.reply-section-enter {
+    animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.send-reply-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.reply-input {
+    transition: border-color 0.2s ease;
+}
+
+.reply-input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.1);
+}

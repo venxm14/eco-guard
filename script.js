@@ -86,40 +86,38 @@ function eraseCookie(name) {
    JOINED MISSIONS (localStorage — per user)
 ================================ */
 function _getJoinedKey() {
-  try {
-    const u = JSON.parse(localStorage.getItem('ecoUser') || '{}');
-    if (u && u.id) return 'ecoguard_joined_' + u.id;
-  } catch {}
-  return null; // not logged in → no key
+    try {
+        const u = JSON.parse(localStorage.getItem('ecoUser') || '{}');
+        if (u && u.id) return 'ecoguard_joined_' + u.id;
+    } catch {}
+    return null;
 }
 
 function getJoinedMissions() {
-  const key = _getJoinedKey();
-  if (!key) return []; // not logged in = nothing joined
-  try {
-    const ls = localStorage.getItem(key);
-    return ls ? JSON.parse(ls) : [];
-  } catch { return []; }
+    const key = _getJoinedKey();
+    if (!key) return [];
+    try {
+        const ls = localStorage.getItem(key);
+        return ls ? JSON.parse(ls) : [];
+    } catch { return []; }
 }
 
 function markMissionJoined(missionId) {
-  const key = _getJoinedKey();
-  if (!key) return; // shouldn't happen, but guard
-  const joined = getJoinedMissions();
-  if (!joined.includes(String(missionId))) {
-    joined.push(String(missionId));
-    localStorage.setItem(key, JSON.stringify(joined));
-  }
+    const key = _getJoinedKey();
+    if (!key) return;
+    const joined = getJoinedMissions();
+    if (!joined.includes(String(missionId))) {
+        joined.push(String(missionId));
+        localStorage.setItem(key, JSON.stringify(joined));
+    }
 }
 
 /**
  * Resolve an image field from the DB to a usable <img> src.
- * New images: full Supabase Storage URL (starts with 'http') → used directly.
- * Old/legacy images: just a filename → prefixed with local /uploads/ path.
  */
 function resolveImageUrl(image) {
-  if (!image) return null;
-  return image.startsWith('http') ? image : `${API_BASE}/uploads/${encodeURIComponent(image)}`;
+    if (!image) return null;
+    return image.startsWith('http') ? image : `${API_BASE}/uploads/${encodeURIComponent(image)}`;
 }
 
 /* ===============================
@@ -154,11 +152,46 @@ class AuthManager {
     getAuthHeader() {
         return this.token ? { Authorization: `Bearer ${this.token}` } : {};
     }
+    // In AuthManager class, add these methods
 
-    /**
-     * Wrapper for fetch that automatically attaches the auth header
-     * and handles 401 (Unauthorized) / 403 (Forbidden) errors globally.
-     */
+async fetchUserLikes() {
+    if (!this.isAuthenticated()) return {};
+    
+    try {
+        const res = await this.apiFetch('/api/social/user-likes');
+        const data = await res.json();
+        
+        if (data.success) {
+            // Store in localStorage for persistence
+            localStorage.setItem('ecoUserLikes', JSON.stringify(data.liked_items));
+            return data.liked_items;
+        }
+        return {};
+    } catch (err) {
+        console.error('Error fetching user likes:', err);
+        // Fallback to localStorage if API fails
+        const cached = localStorage.getItem('ecoUserLikes');
+        return cached ? JSON.parse(cached) : {};
+    }
+}
+
+getUserLikes() {
+    const cached = localStorage.getItem('ecoUserLikes');
+    return cached ? JSON.parse(cached) : {};
+}
+
+updateUserLikes(itemId, itemType, isLiked) {
+    const likes = this.getUserLikes();
+    const key = `${itemType}_${itemId}`;
+    
+    if (isLiked) {
+        likes[key] = true;
+    } else {
+        delete likes[key];
+    }
+    
+    localStorage.setItem('ecoUserLikes', JSON.stringify(likes));
+}
     async apiFetch(endpoint, options = {}) {
         const headers = {
             ...options.headers,
@@ -179,7 +212,6 @@ class AuthManager {
 
         return res;
     }
-
 
     async login(email, password) {
         const res = await fetch(`${API_BASE}/api/auth/login`, {
@@ -249,13 +281,338 @@ class GoaEcoGuard {
         this.allHotspots = [];
         this.hotspotsGrouped = {};
         this.markersByLocation = {};
+        this.handleProfileItemClick = this.handleProfileItemClick.bind(this);
         this.init();
     }
 
+    init() {
+        this.initEventListeners();
+        this.checkAuthState();
+        this.loadAllData();
+        this.testBackendConnection();
+        this.initIntersectionObserver();
+        this.initNavbarScroll();
+        this.initViewOnMapButtons();
+        this.initLeafParticles();
+        this.initSettingsHandlers();
+        this.showToast('Welcome to Goa Eco-Guard!', 'success');
+    }
+
+    // Add this method to the GoaEcoGuard class
+
+attachCommentReplyListeners() {
+    // Toggle reply section
+    document.querySelectorAll('.reply-toggle-btn').forEach(btn => {
+        // Remove existing listeners to prevent duplicates
+        btn.removeEventListener('click', this.handleReplyToggle);
+        
+        this.handleReplyToggle = (e) => {
+            const commentId = e.target.dataset.commentId;
+            const replySection = document.querySelector(`.reply-section-${commentId}`);
+            if (replySection) {
+                const isVisible = replySection.style.display !== 'none';
+                replySection.style.display = isVisible ? 'none' : 'block';
+                if (!isVisible) {
+                    // Focus the input when opened
+                    setTimeout(() => {
+                        document.querySelector(`.reply-input-${commentId}`)?.focus();
+                    }, 100);
+                }
+            }
+        };
+        
+        btn.addEventListener('click', this.handleReplyToggle);
+    });
+    
+    // Cancel reply
+    document.querySelectorAll('.cancel-reply-btn').forEach(btn => {
+        btn.removeEventListener('click', this.handleCancelReply);
+        
+        this.handleCancelReply = (e) => {
+            const commentId = e.target.dataset.commentId;
+            const replySection = document.querySelector(`.reply-section-${commentId}`);
+            const replyInput = document.querySelector(`.reply-input-${commentId}`);
+            if (replySection) {
+                replySection.style.display = 'none';
+            }
+            if (replyInput) {
+                replyInput.value = '';
+            }
+        };
+        
+        btn.addEventListener('click', this.handleCancelReply);
+    });
+    
+    // Send reply
+    document.querySelectorAll('.send-reply-btn').forEach(btn => {
+        btn.removeEventListener('click', this.handleSendReply);
+        
+        this.handleSendReply = async (e) => {
+            const btn = e.target;
+            const commentId = btn.dataset.commentId;
+            const targetId = btn.dataset.targetId;
+            const targetType = btn.dataset.targetType;
+            const replyInput = document.querySelector(`.reply-input-${commentId}`);
+            
+            if (!replyInput) return;
+            
+            const replyText = replyInput.value.trim();
+            if (!replyText) {
+                this.showToast('Please enter a reply', 'error');
+                return;
+            }
+            
+            if (!this.auth.isAuthenticated()) {
+                this.showToast('Please login to reply', 'error');
+                return;
+            }
+            
+            try {
+                // Show loading state
+                btn.disabled = true;
+                btn.innerHTML = 'Sending...';
+                
+                // Post the reply as a comment
+                const res = await this.auth.apiFetch('/api/social/comment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        item_id: targetId, 
+                        item_type: targetType, 
+                        text: replyText,
+                        parent_id: commentId // Optional: if you want threading
+                    })
+                });
+                
+                const data = await res.json();
+                
+                if (data.success) {
+                    this.showToast('Reply sent! 💬', 'success');
+                    
+                    // Clear and hide the reply section
+                    replyInput.value = '';
+                    const replySection = document.querySelector(`.reply-section-${commentId}`);
+                    if (replySection) {
+                        replySection.style.display = 'none';
+                    }
+                    
+                    // Refresh comments after a short delay
+                    setTimeout(() => {
+                        this.fetchDashboardComments();
+                    }, 500);
+                } else {
+                    throw new Error(data.error || 'Failed to send reply');
+                }
+            } catch (err) {
+                console.error('Reply error:', err);
+                this.showToast(err.message || 'Failed to send reply', 'error');
+            } finally {
+                // Reset button state
+                btn.disabled = false;
+                btn.innerHTML = 'Send';
+            }
+        };
+        
+        btn.addEventListener('click', this.handleSendReply);
+    });
+    
+    // Allow Enter key to send
+    document.querySelectorAll('[class^="reply-input-"]').forEach(input => {
+        input.removeEventListener('keypress', this.handleReplyKeypress);
+        
+        this.handleReplyKeypress = (e) => {
+            if (e.key === 'Enter') {
+                const commentId = e.target.dataset.commentId;
+                const sendBtn = document.querySelector(`.send-reply-btn[data-comment-id="${commentId}"]`);
+                if (sendBtn) {
+                    sendBtn.click();
+                }
+            }
+        };
+        
+        input.addEventListener('keypress', this.handleReplyKeypress);
+    });
+}
+    /* ---------- PROFILE SCROLLING METHODS ---------- */
+    
+    attachProfileClickListeners() {
+        const modalContent = document.querySelector('#settingsModal .modal-content');
+        if (!modalContent) {
+            console.log('⚠️ Modal content not ready yet');
+            return false;
+        }
+        
+        modalContent.removeEventListener('click', this.handleProfileItemClick);
+        modalContent.addEventListener('click', this.handleProfileItemClick);
+        console.log('✅ Profile click listeners attached');
+        return true;
+    }
+
+    handleProfileItemClick = (e) => {
+        const item = e.target.closest('.profile-clickable-item');
+        if (!item) return;
+        
+        const itemType = item.dataset.profileItem;
+        const itemId = item.dataset.itemId;
+        const parentType = item.dataset.parentType;
+        
+        if (!itemType || !itemId) return;
+        
+        console.log(`🔍 Profile item clicked: ${itemType} - ${itemId}`, parentType);
+        
+        this.closeModal();
+        
+        setTimeout(() => {
+            switch(itemType) {
+                case 'reports':
+                    this.scrollToReport(itemId);
+                    break;
+                case 'sightings':
+                    this.scrollToSighting(itemId);
+                    break;
+                case 'stories':
+                    this.scrollToStory(itemId);
+                    break;
+                case 'missions':
+                    this.scrollToMission(itemId);
+                    break;
+                case 'comments':
+                    this.scrollToComment(itemId, parentType);
+                    break;
+                default:
+                    console.log('Unknown item type:', itemType);
+            }
+        }, 300);
+    };
+
+// Update the scrollToComment method
+
+scrollToComment(itemId, parentType) {
+    console.log('💬 Scrolling to comment on:', parentType, itemId);
+    
+    if (parentType === 'report') {
+        this.scrollToReport(itemId);
+    } else if (parentType === 'sighting') {
+        this.scrollToSighting(itemId);
+    } else if (parentType === 'story') {
+        this.scrollToStory(itemId);
+    } else {
+        this.scrollToSection('eco-reporting');
+    }
+    
+    setTimeout(() => {
+        const commentsSection = document.getElementById(`comments-${itemId}`);
+        if (commentsSection) {
+            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            this.highlightElement(commentsSection);
+            
+            const commentBtn = document.querySelector(`.comment-btn[onclick*="${itemId}"]`);
+            if (commentBtn && !commentsSection.classList.contains('active')) {
+                commentBtn.click();
+            }
+        } else {
+            // If no comments section found, try to find and highlight the comment in profile
+            const profileComment = document.querySelector(`.profile-comment-item[data-comment-id="${itemId}"]`);
+            if (profileComment) {
+                profileComment.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                this.highlightElement(profileComment);
+                
+                // Auto-open the reply section for this comment
+                setTimeout(() => {
+                    const replyToggle = document.querySelector(`.reply-toggle-btn[data-comment-id="${itemId}"]`);
+                    if (replyToggle) {
+                        replyToggle.click();
+                    }
+                }, 500);
+            }
+        }
+    }, 800);
+}
+
+    scrollToReport(reportId) {
+        console.log('📋 Scrolling to report:', reportId);
+        this.scrollToSection('eco-reporting');
+        
+        setTimeout(() => {
+            const reportCard = document.querySelector(`.report-card[data-report-id="${reportId}"]`);
+            if (reportCard) {
+                reportCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                this.highlightElement(reportCard);
+            } else {
+                this.switchFeed('reports');
+            }
+        }, 500);
+    }
+
+    scrollToSighting(sightingId) {
+        console.log('🦎 Scrolling to sighting:', sightingId);
+        this.scrollToSection('nf-sightings');
+        
+        setTimeout(() => {
+            const sightingItem = document.querySelector(`.nf-sighting-item[data-sighting-id="${sightingId}"]`);
+            if (sightingItem) {
+                sightingItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                this.highlightElement(sightingItem);
+            }
+        }, 500);
+    }
+
+    scrollToStory(storyId) {
+        console.log('📖 Scrolling to story:', storyId);
+        this.scrollToSection('nf-stories');
+        
+        setTimeout(() => {
+            const storyCard = document.querySelector(`.nf-story-card[data-story-id="${storyId}"]`);
+            if (storyCard) {
+                storyCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                this.highlightElement(storyCard);
+            } else {
+                this.scrollToSection('eco-reporting');
+                setTimeout(() => {
+                    const feedStory = document.querySelector(`#storiesFeed .nf-story-card[data-story-id="${storyId}"]`);
+                    if (feedStory) {
+                        feedStory.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        this.highlightElement(feedStory);
+                    }
+                }, 500);
+            }
+        }, 500);
+    }
+
+    scrollToMission(missionId) {
+        console.log('🎯 Scrolling to mission:', missionId);
+        this.scrollToSection('volunteer');
+        
+        setTimeout(() => {
+            const missionBtn = document.querySelector(`.join-mission-btn[data-mission-id="${missionId}"]`);
+            if (missionBtn) {
+                const missionCard = missionBtn.closest('.mission-card');
+                if (missionCard) {
+                    missionCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    this.highlightElement(missionCard);
+                }
+            }
+        }, 500);
+    }
+
+    highlightElement(element) {
+        element.classList.add('profile-highlight');
+        setTimeout(() => {
+            element.classList.remove('profile-highlight');
+        }, 2000);
+    }
+    // Add this helper method to refresh comments
+
+    refreshComments() {
+        if (document.getElementById('settingsModal')?.classList.contains('active')) {
+            this.fetchDashboardComments();
+        }
+    }
+
+    /* ---------- TEST BACKEND ---------- */
     async testBackendConnection() {
         try {
             console.log('Testing backend connection to:', API_BASE);
-
             const response = await fetch(`${API_BASE}/api/health`, {
                 method: 'GET',
                 mode: 'cors',
@@ -272,22 +629,16 @@ class GoaEcoGuard {
             }
         } catch (error) {
             console.error('❌ Cannot connect to backend:', error.message);
-            console.log('Troubleshooting steps:');
-            console.log('1. Make sure backend is running: node server.js');
-            console.log('2. Check if port 3000 is available');
-            console.log('3. Try accessing:', `${API_BASE}/api/health` + ' in your browser');
             return false;
         }
     }
 
-
-
     getMarkerIcon(status) {
         const colors = {
-            pending: '#f97316',   // orange
-            approved: '#2563eb',  // blue
-            resolved: '#16a34a',  // green
-            rejected: '#dc2626'   // red
+            pending: '#f97316',
+            approved: '#2563eb',
+            resolved: '#16a34a',
+            rejected: '#dc2626'
         };
 
         return L.divIcon({
@@ -307,21 +658,6 @@ class GoaEcoGuard {
         });
     }
 
-
-    /* ---------- INIT ---------- */
-    init() {
-        this.initEventListeners();
-        this.checkAuthState();
-        this.loadAllData();
-        this.testBackendConnection();
-        this.initIntersectionObserver();
-        this.initNavbarScroll();
-        this.initViewOnMapButtons();
-        this.initLeafParticles();
-        this.initSettingsHandlers();
-        this.showToast('Welcome to Goa Eco-Guard!', 'success');
-    }
-
     /* ---------- NAVBAR SCROLL ---------- */
     initNavbarScroll() {
         const header = document.querySelector('.header');
@@ -331,21 +667,11 @@ class GoaEcoGuard {
 
         window.addEventListener('scroll', () => {
             const currentScrollY = window.scrollY;
-
-            // Add/remove scrolled class based on scroll position
             if (currentScrollY > 50) {
                 header.classList.add('scrolled');
             } else {
                 header.classList.remove('scrolled');
             }
-
-            // Hide/show navbar based on scroll direction DISABLE FOR STICKY
-            // if (currentScrollY > lastScrollY && currentScrollY > 200) {
-            //    header.classList.add('hidden');
-            // } else {
-            //    header.classList.remove('hidden');
-            // }
-
             lastScrollY = currentScrollY;
         });
     }
@@ -387,16 +713,13 @@ class GoaEcoGuard {
 
     /* ---------- EVENTS ---------- */
     initEventListeners() {
-        // Navigation buttons - scroll to sections
         document.addEventListener('click', async (e) => {
             const section = e.target.closest('[data-section]');
             if (section) {
                 const sectionId = section.getAttribute('data-section');
                 this.scrollToSection(sectionId);
-                // Close mobile menu if open
                 document.getElementById('mobileNav')?.classList.remove('active');
                 document.getElementById('mobileMenuBtn')?.classList.remove('active');
-                // Update active nav link
                 document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
                 e.target.closest('.nav-link')?.classList.add('active');
                 return;
@@ -411,7 +734,6 @@ class GoaEcoGuard {
                 return;
             }
 
-            // Get current location button
             if (e.target.id === 'getLocationBtn' || e.target.closest('#getLocationBtn')) {
                 e.preventDefault();
                 this.getCurrentLocation();
@@ -420,7 +742,6 @@ class GoaEcoGuard {
 
             if (e.target.id === 'logoutBtn') this.auth.logout();
 
-            // Mobile menu toggle
             if (e.target.id === 'mobileMenuBtn' || e.target.closest('#mobileMenuBtn')) {
                 const mobileNav = document.getElementById('mobileNav');
                 const menuBtn = document.getElementById('mobileMenuBtn');
@@ -429,7 +750,6 @@ class GoaEcoGuard {
                 return;
             }
 
-            // Mission modal handlers
             if (e.target.classList.contains('modal-close') || e.target.classList.contains('close') || e.target.classList.contains('close-modal') || e.target.id === 'closeJoin') {
                 document.querySelectorAll('.modal.active, .modal.closing').forEach(m => {
                     m.classList.remove('active');
@@ -437,34 +757,30 @@ class GoaEcoGuard {
                     setTimeout(() => {
                         m.classList.remove('closing');
                         m.classList.add('hidden');
-                        m.style.display = '';  // clear inline style so class-based show works next time
+                        m.style.display = '';
                     }, 250);
                 });
                 return;
             }
 
-            // Join mission button
             if (e.target.classList.contains('join-mission-btn')) {
                 const missionId = e.target.dataset.missionId;
                 this.openMissionModal(missionId);
                 return;
             }
 
-            // Confirm join mission
             if (e.target.id === 'confirmJoinBtn') {
                 const missionId = e.target.dataset.missionId;
                 this.showJoinForm(missionId);
                 return;
             }
 
-            // Submit join form
             if (e.target.closest('#joinForm')) {
                 e.preventDefault();
                 this.handleJoinMission(e);
                 return;
             }
 
-            // Know more button for eco spots
             if (e.target.classList.contains('know-more-btn') || e.target.closest('.know-more-btn')) {
                 const btn = e.target.closest('.know-more-btn') || e.target;
                 const spotId = btn.dataset.spotId;
@@ -474,22 +790,16 @@ class GoaEcoGuard {
                 return;
             }
 
-            // Heatmap filter buttons
             if (e.target.classList.contains('filter-btn')) {
                 const filterBtn = e.target;
                 const filter = filterBtn.dataset.filter;
 
-                // Update active state
                 document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
                 filterBtn.classList.add('active');
 
-                console.log('🔍 Filter applied:', filter);
-
-                // Re-render map and cards with new filter
                 this.renderMarkers();
                 this.renderHotspotCards();
 
-                // Fit map bounds to filtered markers
                 if (this.map && this.hotspotsGrouped) {
                     setTimeout(() => {
                         const filteredHotspots = Object.values(this.hotspotsGrouped).filter(h =>
@@ -508,9 +818,6 @@ class GoaEcoGuard {
                 return;
             }
 
-            // Image source buttons (gallery / camera)
-            // these are static elements in index.html; when clicked they trigger
-            // the hidden file input or open camera.
             if (e.target.id === 'galleryBtn' || e.target.closest('#galleryBtn')) {
                 const img = document.getElementById('image');
                 if (img) img.click();
@@ -520,14 +827,12 @@ class GoaEcoGuard {
             if (e.target.id === 'cameraBtn' || e.target.closest('#cameraBtn')) {
                 const img = document.getElementById('image');
                 if (!img) return;
-                // check for camera hardware
                 const cameraAvailable = await this.hasCamera();
                 if (!cameraAvailable) {
                     this.showToast('No camera detected, please choose from gallery', 'error');
                     img.click();
                     return;
                 }
-                // attempt advanced capture via getUserMedia
                 if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
                     try {
                         const file = await this.openCameraCapture();
@@ -546,7 +851,6 @@ class GoaEcoGuard {
                         img.click();
                     }
                 } else {
-                    // fallback to input capture
                     const cameraInput = document.createElement('input');
                     cameraInput.type = 'file';
                     cameraInput.accept = 'image/*';
@@ -572,18 +876,15 @@ class GoaEcoGuard {
             }
         });
 
-        // Login and signup forms are now on separate pages
         document.getElementById('loginForm')?.addEventListener('submit', e => this.handleLogin(e));
         document.getElementById('signupForm')?.addEventListener('submit', e => this.handleSignup(e));
         document.getElementById('reportingForm')?.addEventListener('submit', e => this.submitReport(e));
 
-        // Forward geocoding for manual location entry
         const locationInput = document.getElementById('location');
         const getLocationBtn = document.getElementById('getLocationBtn');
         if (locationInput) {
             let debounceTimer;
             locationInput.addEventListener('input', () => {
-                // Hide "Use Current Location" if user starts typing a lot
                 if (locationInput.value.length > 3) {
                     getLocationBtn.style.display = 'none';
                 } else if (locationInput.value.length === 0) {
@@ -600,14 +901,13 @@ class GoaEcoGuard {
         const section = document.getElementById(sectionId);
         if (!section) return;
 
-        const headerOffset = 80; // fixed header height
+        const headerOffset = 80;
         const targetPosition = section.getBoundingClientRect().top + window.pageYOffset - headerOffset;
         const startPosition = window.pageYOffset;
         const distance = targetPosition - startPosition;
-        const duration = 800; // ms
+        const duration = 800;
         let startTime = null;
 
-        // easeInOutCubic for a satisfying scroll feel
         function ease(t) {
             return t < 0.5
                 ? 4 * t * t * t
@@ -629,7 +929,6 @@ class GoaEcoGuard {
         requestAnimationFrame(animateScroll);
     }
 
-    // Determine if the current device has a video input (webcam/camera)
     async hasCamera() {
         if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
             return false;
@@ -643,7 +942,6 @@ class GoaEcoGuard {
         }
     }
 
-    // open a minimal camera capture overlay using getUserMedia, returning a File
     openCameraCapture() {
         return new Promise(async (resolve, reject) => {
             let stream;
@@ -654,7 +952,6 @@ class GoaEcoGuard {
                 return;
             }
 
-            // create overlay elements
             const overlay = document.createElement('div');
             overlay.style.position = 'fixed';
             overlay.style.top = '0';
@@ -729,7 +1026,6 @@ class GoaEcoGuard {
         });
     }
 
-
     /* ---------- AUTH HANDLERS ---------- */
     async handleLogin(e) {
         e.preventDefault();
@@ -740,7 +1036,6 @@ class GoaEcoGuard {
         try {
             const result = await this.auth.login(email, password);
 
-            // 🔐 Admin redirect
             if (result.user.role === 'admin') {
                 window.location.href = 'admin/admin.html';
                 return;
@@ -802,10 +1097,7 @@ class GoaEcoGuard {
                 return [];
             }
             const data = await res.json();
-            console.log(`API ${endpoint} response:`, data);
-            // Ensure we always return an array for list endpoints
             if (data === null || data === undefined) {
-                console.warn(`API ${endpoint} returned null/undefined`);
                 return [];
             }
             return Array.isArray(data) ? data : (data || []);
@@ -819,10 +1111,7 @@ class GoaEcoGuard {
     async loadReports() {
         try {
             this.reports = await this.fetchJSON('/api/reports');
-            console.log('Loaded reports:', this.reports);
-            // Ensure reports is always an array
             if (!Array.isArray(this.reports)) {
-                console.warn('Reports is not an array:', typeof this.reports, this.reports);
                 this.reports = [];
             }
             this.renderReports();
@@ -841,7 +1130,6 @@ class GoaEcoGuard {
         }
 
         const formData = new FormData(e.target);
-
         const lat = formData.get('latitude');
         const lng = formData.get('longitude');
 
@@ -859,29 +1147,25 @@ class GoaEcoGuard {
             const data = await res.json();
 
             if (!res.ok) {
-                // Check if it's a duplicate report error
                 if (data.type === 'duplicate_report') {
                     this.showToast('⚠️ Duplicate report: This issue has already been reported at this location.', 'error');
-                    // clear the form but keep location
                     const imageInput = document.getElementById('image');
                     if (imageInput) imageInput.value = '';
                     document.getElementById('imagePreview').innerHTML = '';
                     document.getElementById('imagePreview').style.display = 'none';
                     document.getElementById('uploadArea').style.display = 'flex';
                     document.getElementById('description').value = '';
-                    return; // Stop execution
+                    return;
                 }
 
-                // Check if it's a sensitive content error
                 if (data.type === 'sensitive_content') {
                     this.showSensitiveContentAlert();
-                    // clear the image input
                     const imageInput = document.getElementById('image');
                     if (imageInput) imageInput.value = '';
                     document.getElementById('imagePreview').innerHTML = '';
                     document.getElementById('imagePreview').style.display = 'none';
                     document.getElementById('uploadArea').style.display = 'flex';
-                    return; // Stop execution
+                    return;
                 }
 
                 throw new Error(data.error || 'Failed to submit report');
@@ -894,9 +1178,8 @@ class GoaEcoGuard {
             document.getElementById('imagePreview').style.display = 'none';
             document.getElementById('uploadArea').style.display = 'flex';
 
-            // ✅ UPDATE BOTH
             this.loadReports();
-            this.loadHotspots(); // 🔥 THIS MAKES MAP LIVE
+            this.loadHotspots();
         } catch (err) {
             this.showToast(err.message || 'Failed to submit report', 'error');
         }
@@ -916,7 +1199,6 @@ class GoaEcoGuard {
             return;
         }
 
-        // Update button text to show loading
         const originalText = locationBtn.innerHTML;
         locationBtn.innerHTML = '🔄 Getting location...';
         locationBtn.disabled = true;
@@ -926,23 +1208,15 @@ class GoaEcoGuard {
                 const lat = position.coords.latitude;
                 const lng = position.coords.longitude;
 
-                console.log('📍 Location captured:', { lat, lng });
-
-                // Populate hidden fields
                 latInput.value = lat;
                 lngInput.value = lng;
 
-                // Sync with map
                 this.updateLocalReportMarker(lat, lng);
-
-                // Try to get location name using reverse geocoding
                 await this.reverseGeocode(lat, lng);
 
-                // Show success message
                 locationStatus.style.display = 'block';
                 this.showToast('Location captured successfully!', 'success');
 
-                // Reset button
                 locationBtn.innerHTML = originalText;
                 locationBtn.disabled = false;
             },
@@ -964,7 +1238,6 @@ class GoaEcoGuard {
 
                 this.showToast(errorMessage, 'error');
 
-                // Reset button
                 locationBtn.innerHTML = originalText;
                 locationBtn.disabled = false;
             },
@@ -978,28 +1251,15 @@ class GoaEcoGuard {
 
     renderReports() {
         const container = document.getElementById('reportsList');
-        if (!container) {
-            console.warn('⚠️ reportsList container not found');
-            return;
-        }
+        if (!container) return;
 
-        // Ensure reports is an array before accessing length
         if (!this.reports || !Array.isArray(this.reports)) {
-            console.warn('⚠️ Reports is not an array:', typeof this.reports, this.reports);
             this.reports = [];
         }
-
-        console.log(`🎨 Rendering ${this.reports.length} reports`);
-
-        if (this.reports.length > 0) {
-            console.log('📋 First report:', this.reports[0]);
-        }
-
 
         container.innerHTML = this.reports.length
             ? this.reports.map(r => {
                 const status = (r.status || 'pending').toLowerCase();
-                const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
                 const statusClass = `status-${status}`;
                 const timeStr = this.formatReportTime(r.created_at || r.createdAt || r.timestamp);
                 const userName = r.users?.name || 'Anonymous';
@@ -1069,7 +1329,6 @@ class GoaEcoGuard {
                     if (countSpan) countSpan.innerText = data.likes_count;
                     btn.classList.toggle('liked', data.action === 'liked');
                     
-                    // Visual feedback
                     if (data.action === 'liked') {
                         this.showToast('Impact liked! ❤️', 'success');
                     }
@@ -1092,7 +1351,7 @@ class GoaEcoGuard {
 
         if (action === 'repost') {
             const commentary = prompt('Add your thoughts (optional):');
-            if (commentary === null) return; // cancelled
+            if (commentary === null) return;
 
             try {
                 const res = await this.auth.apiFetch('/api/social/repost', {
@@ -1115,11 +1374,9 @@ class GoaEcoGuard {
 
         section.classList.toggle('active');
         if (section.classList.contains('active')) {
-            // Auto-focus input
             const input = section.querySelector('input');
             if (input) setTimeout(() => input.focus(), 100);
 
-            // Load comments
             const list = document.getElementById(`commentList-${itemId}`);
             list.innerHTML = '<p style="font-size:0.7rem; padding:0.5rem;">Loading replies...</p>';
             
@@ -1203,16 +1460,13 @@ class GoaEcoGuard {
 
         closeBtn?.addEventListener('click', () => modal.classList.remove('active'));
         
-        // Logout
         logoutBtn?.addEventListener('click', () => this.auth.logout());
 
-        // Start polling for notifications
         if (this.auth.isAuthenticated()) {
             this.checkNotifications();
-            setInterval(() => this.checkNotifications(), 60000); // Every minute
+            setInterval(() => this.checkNotifications(), 60000);
         }
 
-        // Feed tabs switching (KEEP OLD LOGIC)
         document.querySelectorAll('.feed-tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 const feedType = tab.dataset.feed;
@@ -1220,7 +1474,6 @@ class GoaEcoGuard {
             });
         });
 
-        // Bottom nav switching
         document.querySelectorAll('.bottom-nav-item[data-tab]').forEach(item => {
             item.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -1233,7 +1486,6 @@ class GoaEcoGuard {
     switchDashboardTab(tabId) {
         console.log('🔄 Switching dashboard tab to:', tabId);
         
-        // Update buttons
         document.querySelectorAll('.profile-tab-dash').forEach(btn => {
             const isActive = btn.id === `tab${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`;
             btn.classList.toggle('active', isActive);
@@ -1249,7 +1501,6 @@ class GoaEcoGuard {
             btn.classList.toggle('font-medium', !isActive);
         });
 
-        // Update sections
         document.querySelectorAll('.dashboard-section').forEach(section => {
             section.classList.toggle('hidden', section.id !== `dashboardSection-${tabId}`);
         });
@@ -1279,7 +1530,6 @@ class GoaEcoGuard {
         }
 
         try {
-            // Update static info
             const user = this.auth.user;
             const initial = user.name.charAt(0).toUpperCase();
             
@@ -1297,17 +1547,21 @@ class GoaEcoGuard {
             if (accEmail) accEmail.innerText = user.email;
             if (accPhone) accPhone.innerText = user.phone || 'Not provided';
 
-            // Reset modal state
             modal.classList.remove('closing', 'hidden');
-            modal.style.display = ''; // Clear any inline display styles
+            modal.style.display = '';
             
-            // Reset tabs to impact view
             this.switchDashboardTab('impact');
             
-            // Show modal
             modal.classList.add('active');
             
-            // Fetch stats
+            // Attach click listeners now that modal is visible
+            setTimeout(() => {
+                const attached = this.attachProfileClickListeners();
+                if (!attached) {
+                    setTimeout(() => this.attachProfileClickListeners(), 100);
+                }
+            }, 100);
+            
             await this.fetchProfileStats();
             
             console.log('✅ Profile modal opened successfully');
@@ -1317,87 +1571,79 @@ class GoaEcoGuard {
         }
     }
 
-// In script.js - update the fetchProfileStats method
+    async fetchProfileStats() {
+        try {
+            console.log('📊 Fetching detailed dashboard stats...');
+            const res = await this.auth.apiFetch(`/api/profile/stats/${this.auth.user.id}`);
+            const data = await res.json();
+            
+            if (res.ok) {
+                console.log('✅ Profile stats received:', data);
+                
+                const statMappings = [
+                    { id: 'dashStatReports', value: data.counts?.reports || 0 },
+                    { id: 'dashStatSightings', value: data.counts?.sightings || 0 },
+                    { id: 'dashStatStories', value: data.counts?.stories || 0 },
+                    { id: 'dashStatMissions', value: data.counts?.missions || 0 }
+                ];
+                
+                statMappings.forEach(({ id, value }) => {
+                    const el = document.getElementById(id);
+                    if (el) {
+                        el.innerText = value;
+                        console.log(`✅ Updated ${id}: ${value}`);
+                    }
+                });
 
-async fetchProfileStats() {
-  try {
-    console.log('📊 Fetching detailed dashboard stats...');
-    const res = await this.auth.apiFetch(`/api/profile/stats/${this.auth.user.id}`);
-    const data = await res.json();
-    
-    if (res.ok) {
-      console.log('✅ Profile stats received:', data);
-      
-      // Update Counts
-      const statMappings = [
-        { id: 'dashStatReports', value: data.counts?.reports || 0 },
-        { id: 'dashStatSightings', value: data.counts?.sightings || 0 },
-        { id: 'dashStatStories', value: data.counts?.stories || 0 },
-        { id: 'dashStatMissions', value: data.counts?.missions || 0 }
-      ];
-      
-      statMappings.forEach(({ id, value }) => {
-        const el = document.getElementById(id);
-        if (el) {
-          el.innerText = value;
-          console.log(`✅ Updated ${id}: ${value}`);
-        } else {
-          console.warn(`⚠️ Element ${id} not found`);
+                this.renderDashboardList(
+                    'reports', 
+                    data.details?.reports || [], 
+                    'dashboardReportsList', 
+                    'assignment', 
+                    'No reports filed yet.', 
+                    'START A REPORT', 
+                    'eco-reporting'
+                );
+                
+                this.renderDashboardList(
+                    'sightings', 
+                    data.details?.sightings || [], 
+                    'dashboardSightingsList', 
+                    'visibility', 
+                    'No sightings logged.', 
+                    'Log a Sighting', 
+                    'eco-reporting'
+                );
+                
+                this.renderDashboardList(
+                    'stories', 
+                    data.details?.stories || [], 
+                    'dashboardStoriesList', 
+                    'auto_stories', 
+                    'No stories shared.', 
+                    'Tell a Story', 
+                    'eco-reporting'
+                );
+                
+                this.renderDashboardList(
+                    'missions', 
+                    data.details?.missions || [], 
+                    'dashboardMissionsList', 
+                    'groups', 
+                    'No missions joined.', 
+                    'Browse Missions', 
+                    'volunteer'
+                );
+
+                this.fetchDashboardComments();
+            }
+        } catch (err) { 
+            console.error('❌ Stats fetch error:', err); 
         }
-      });
-      // Log missions data for debugging
-      if (data.details?.missions) {
-        console.log('🎯 Missions data:', data.details.missions);
-      }
-
-      // Render Lists with proper data
-      this.renderDashboardList(
-        'reports', 
-        data.details?.reports || [], 
-        'dashboardReportsList', 
-        'assignment', 
-        'No reports filed yet.', 
-        'START A REPORT', 
-        'eco-reporting'
-      );
-      
-      this.renderDashboardList(
-        'sightings', 
-        data.details?.sightings || [], 
-        'dashboardSightingsList', 
-        'visibility', 
-        'No sightings logged.', 
-        'Log a Sighting', 
-        'eco-reporting'
-      );
-      
-      this.renderDashboardList(
-        'stories', 
-        data.details?.stories || [], 
-        'dashboardStoriesList', 
-        'auto_stories', 
-        'No stories shared.', 
-        'Tell a Story', 
-        'eco-reporting'
-      );
-      
-      this.renderDashboardList(
-        'missions', 
-        data.details?.missions || [], 
-        'dashboardMissionsList', 
-        'groups', 
-        'No missions joined.', 
-        'Browse Missions', 
-        'volunteer'
-      );
-
-      // Fetch and Render Interactions (Comments)
-      this.fetchDashboardComments();
     }
-  } catch (err) { 
-    console.error('❌ Stats fetch error:', err); 
-  }
-}
+
+// In script.js - update fetchDashboardComments method
+
     async fetchDashboardComments() {
         try {
             const listEl = document.getElementById('dashboardCommentsList');
@@ -1424,71 +1670,67 @@ async fetchProfileStats() {
                     listEl.innerHTML = data.slice(0, 5).map(item => {
                         const isOwn = item.user_id === this.auth.user.id;
                         const icon = isOwn ? 'chat_bubble_outline' : 'reply';
-                        const label = isOwn ? 'You commented' : `${item.users?.name || 'Someone'} replied to you`;
+                        const label = isOwn ? 'You commented' : `${item.users?.name || 'Someone'} replied`;
+                        
+                        const targetId = item.item_id || item.id;
+                        const targetType = item.item_type || 'post';
+                        const commentId = item.id;
+                        
+                        const dataAttributes = `data-profile-item="comments" data-item-id="${targetId}" data-parent-type="${targetType}" data-comment-id="${commentId}"`;
                         
                         return `
-                            <div class="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-slate-100 dark:border-emerald-900/30 shadow-sm">
-                                <div class="flex items-start gap-3">
+                            <div class="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-slate-100 dark:border-emerald-900/30 shadow-sm mb-3 profile-comment-item" data-comment-id="${commentId}">
+                                <div class="flex items-start gap-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-emerald-900/20 transition-all p-2 rounded-xl profile-clickable-item" ${dataAttributes}>
                                     <div class="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center flex-shrink-0">
                                         <span class="material-icons-round text-primary text-sm">${icon}</span>
                                     </div>
                                     <div class="flex-1">
                                         <p class="text-xs font-bold text-slate-400 dark:text-emerald-700/80 uppercase tracking-wider">${label}</p>
-                                        <p class="text-sm text-slate-700 dark:text-slate-200 mt-1 line-clamp-2">${item.text}</p>
+                                        <p class="text-sm text-slate-700 dark:text-slate-200 mt-1">${this.escapeHtml(item.text || '')}</p>
                                         <p class="text-[10px] text-slate-400 mt-1">${new Date(item.created_at).toLocaleDateString()}</p>
                                     </div>
+                                </div>
+                                
+                                <!-- Reply section for comments -->
+                                <div class="mt-3 pl-12 pr-2 reply-section-${commentId}" style="display: none;">
+                                    <div class="flex gap-2">
+                                        <input type="text" 
+                                            class="reply-input-${commentId} flex-1 bg-slate-100 dark:bg-emerald-950/30 border border-slate-200 dark:border-emerald-900/30 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-primary" 
+                                            placeholder="Write a reply..." 
+                                            data-comment-id="${commentId}"
+                                            data-target-id="${targetId}"
+                                            data-target-type="${targetType}">
+                                        <button class="send-reply-btn bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors" 
+                                                data-comment-id="${commentId}"
+                                                data-target-id="${targetId}"
+                                                data-target-type="${targetType}">
+                                            Send
+                                        </button>
+                                        <button class="cancel-reply-btn bg-slate-200 dark:bg-emerald-900/30 text-slate-600 dark:text-slate-300 px-3 py-2 rounded-lg text-sm hover:bg-slate-300 dark:hover:bg-emerald-900/50 transition-colors"
+                                                data-comment-id="${commentId}">
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Reply button -->
+                                <div class="mt-2 pl-12">
+                                    <button class="text-xs text-primary font-semibold hover:underline reply-toggle-btn" data-comment-id="${commentId}">
+                                        💬 Reply to this comment
+                                    </button>
                                 </div>
                             </div>
                         `;
                     }).join('');
+                    
+                    // Add event listeners for reply functionality
+                    this.attachCommentReplyListeners();
                 }
             }
-        } catch (err) { console.error('Comments fetch error:', err); }
-    }
-
-    renderDashboardList(type, items, containerId, icon, emptyMsg, ctaText, scrollTarget) {
-        const container = document.getElementById(containerId);
-        if (!container) return;
-
-        if (!items || items.length === 0) {
-            container.innerHTML = `
-                <div class="bg-card-light dark:bg-card-dark border border-dashed border-slate-300 dark:border-emerald-900/50 rounded-2xl p-8 flex flex-col items-center justify-center text-center">
-                    <div class="w-12 h-12 rounded-full bg-slate-100 dark:bg-emerald-950/50 flex items-center justify-center mb-3">
-                        <span class="material-icons-round text-slate-400 dark:text-emerald-800">${icon}</span>
-                    </div>
-                    <p class="text-sm font-medium text-slate-500 dark:text-emerald-700/70">${emptyMsg}</p>
-                    <button class="mt-3 text-xs font-bold text-primary px-4 py-2 rounded-full bg-emerald-50 dark:bg-emerald-950/40" onclick="window.app.scrollToSection('${scrollTarget}'); window.app.closeModal();">${ctaText}</button>
-                </div>
-            `;
-            return;
+        } catch (err) { 
+            console.error('Comments fetch error:', err); 
         }
-
-        container.innerHTML = items.slice(0, 3).map(item => {
-            const title = item.location || item.title || (item.missions ? item.missions.title : (item.species_name || 'Contribution'));
-            const sub = item.description || (item.missions ? item.missions.location : '');
-            const date = new Date(item.created_at).toLocaleDateString();
-            const status = item.status || (type === 'missions' ? 'Joined' : 'Active');
-            const statusColor = status === 'Active' || status === 'Joined' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500';
-
-            return `
-                <div class="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-slate-100 dark:border-emerald-900/30 shadow-sm flex items-center justify-between">
-                    <div class="flex items-center gap-3 overflow-hidden">
-                        <div class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-emerald-950/30 flex items-center justify-center flex-shrink-0">
-                            <span class="material-icons-round text-slate-400 dark:text-emerald-800 text-xl">${icon}</span>
-                        </div>
-                        <div class="overflow-hidden">
-                            <h4 class="text-sm font-bold text-slate-900 dark:text-white truncate">${title}</h4>
-                            <p class="text-xs text-slate-500 dark:text-emerald-700/70 truncate">${sub || date}</p>
-                        </div>
-                    </div>
-                    <span class="text-[10px] font-bold px-2 py-1 rounded-md ${statusColor} uppercase tracking-wider">${status}</span>
-                </div>
-            `;
-        }).join('');
     }
-
-// In script.js - update the missions section in renderDashboardList
-
     renderDashboardList(type, items, containerId, icon, emptyMsg, ctaText, scrollTarget) {
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -1512,12 +1754,11 @@ async fetchProfileStats() {
             let title = '';
             let subtitle = '';
             let status = 'Active';
+            let itemId = item.id || item.mission_id;
             
             if (type === 'missions') {
-                // Handle mission_registrations with nested missions data
                 if (item.missions) {
                     title = item.missions.title || 'Mission';
-                    // Format the date nicely
                     const missionDate = item.missions.date 
                         ? new Date(item.missions.date).toLocaleDateString('en-IN', {
                             day: 'numeric',
@@ -1543,27 +1784,55 @@ async fetchProfileStats() {
                 subtitle = item.location || new Date(item.created_at).toLocaleDateString();
                 status = 'Reported';
             } else if (type === 'stories') {
-                title = item.title || 'Story';
-                subtitle = new Date(item.created_at).toLocaleDateString();
+                title = item.title || 'Untitled Story';
+                const storyDate = item.created_at 
+                    ? new Date(item.created_at).toLocaleDateString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric'
+                      })
+                    : 'Recently';
+                
+                const hasImages = [];
+                if (item.before_image) hasImages.push('📷 Before');
+                if (item.after_image) hasImages.push('📷 After');
+                
+                subtitle = hasImages.length > 0 
+                    ? `${storyDate} • ${hasImages.join(' • ')}`
+                    : storyDate;
+                
                 status = 'Published';
+            } else if (type === 'comments') {
+                const isOwn = item.user_id === this.auth?.user?.id;
+                const commentText = item.text || '';
+                const itemType = item.item_type || 'post';
+                
+                title = isOwn ? 'Your Comment' : `Reply from ${item.users?.name || 'Someone'}`;
+                subtitle = commentText.length > 40 
+                    ? commentText.substring(0, 40) + '...' 
+                    : commentText || `On ${itemType}`;
+                status = 'Interaction';
+                itemId = item.item_id || item.id;
             }
 
-            const statusColor = status === 'Joined' || status === 'Reported' || status === 'Published' 
+            const statusColor = status === 'Joined' || status === 'Reported' || status === 'Published' || status === 'Interaction'
                 ? 'bg-emerald-100 text-emerald-600' 
                 : 'bg-slate-100 text-slate-500';
 
+            const dataAttributes = `data-profile-item="${type}" data-item-id="${itemId || ''}" data-parent-type="${item.item_type || ''}"`;
+
             return `
-                <div class="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-slate-100 dark:border-emerald-900/30 shadow-sm flex items-center justify-between">
-                    <div class="flex items-center gap-3 overflow-hidden">
+                <div class="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-slate-100 dark:border-emerald-900/30 shadow-sm flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-emerald-900/20 transition-all profile-clickable-item" ${dataAttributes}>
+                    <div class="flex items-center gap-3 overflow-hidden flex-1">
                         <div class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-emerald-950/30 flex items-center justify-center flex-shrink-0">
                             <span class="material-icons-round text-slate-400 dark:text-emerald-800 text-xl">${icon}</span>
                         </div>
-                        <div class="overflow-hidden">
+                        <div class="overflow-hidden flex-1">
                             <h4 class="text-sm font-bold text-slate-900 dark:text-white truncate">${this.escapeHtml(title)}</h4>
                             <p class="text-xs text-slate-500 dark:text-emerald-700/70 truncate">${this.escapeHtml(subtitle)}</p>
                         </div>
                     </div>
-                    <span class="text-[10px] font-bold px-2 py-1 rounded-md ${statusColor} uppercase tracking-wider">${status}</span>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-md ${statusColor} uppercase tracking-wider ml-2">${status}</span>
                 </div>
             `;
         }).join('');
@@ -1589,7 +1858,6 @@ async fetchProfileStats() {
                     }
                 }
                 
-                // Old notification list if it exists
                 const notificationList = document.getElementById('notificationList');
                 if (notificationList) {
                     if (data.length > 0) {
@@ -1666,7 +1934,6 @@ async fetchProfileStats() {
             if (res.ok) {
                 this.auth.updateUser(data.user);
                 this.showToast('Profile updated successfully!', 'success');
-                // Update UI elements
                 const dashName = document.getElementById('dashboardName');
                 if (dashName) dashName.innerText = data.user.name;
                 const accName = document.getElementById('accountName');
@@ -1680,12 +1947,10 @@ async fetchProfileStats() {
     }
 
     switchTab(tabId) {
-        // Toggle active states
         document.querySelectorAll('.bottom-nav-item').forEach(i => i.classList.remove('active'));
         const activeItem = document.querySelector(`.bottom-nav-item[data-tab="${tabId}"]`);
         if (activeItem) activeItem.classList.add('active');
 
-        // Map section names to section IDs
         const sections = {
             'home': 'home',
             'reports': 'eco-reporting',
@@ -1712,28 +1977,24 @@ async fetchProfileStats() {
         }
     }
 
-// In script.js - update switchFeed method
-
     switchFeed(feedType) {
-        // Toggle active tab UI
         document.querySelectorAll('.feed-tab').forEach(tab => {
             tab.classList.toggle('active', tab.dataset.feed === feedType);
         });
 
-        // Toggle active content UI
         document.querySelectorAll('.feed-content').forEach(content => {
             content.classList.toggle('active', content.id === `${feedType}Feed`);
         });
 
-        // Refresh dynamic content when tabs are clicked
         if (feedType === 'stories' && window.loadStories) {
-            window.loadStories('feed'); // Only update feed tab
+            window.loadStories('feed');
         }
         
         if (feedType === 'sightings' && window.loadSightings) {
-            window.loadSightings('feed'); // Only update feed tab
+            window.loadSightings('feed');
         }
     }
+
     async openUserProfile(userId) {
         if (!userId) return;
         
@@ -1741,7 +2002,6 @@ async fetchProfileStats() {
             const res = await fetch(`${API_BASE}/api/social/profile/${userId}`);
             const data = await res.json();
             
-            // Create a quick modal for profile
             const modal = document.createElement('div');
             modal.className = 'modal active';
             modal.innerHTML = `
@@ -1786,20 +2046,14 @@ async fetchProfileStats() {
         document.body.appendChild(modal);
     }
 
-
-
     /* ---------- HEATMAP ---------- */
     async loadHotspots() {
         try {
-            // Show loading state
             const loadingEl = document.querySelector('.map-loading');
             if (loadingEl) loadingEl.classList.remove('hidden');
 
-            // Fetch real reports data from backend
             const reports = await this.fetchJSON('/api/reports');
-            console.log('📍 Reports fetched:', reports.length);
 
-            // Convert reports to hotspots format with severity mapping
             this.allHotspots = (reports || []).map(r => ({
                 id: r.id,
                 location: r.location || 'Unknown Location',
@@ -1812,18 +2066,11 @@ async fetchProfileStats() {
                 image: r.image
             })).filter(h => !isNaN(h.lat) && !isNaN(h.lng));
 
-            // Group by location to get report counts
             this.hotspotsGrouped = this.groupHotspotsByLocation(this.allHotspots);
 
-            console.log('🗺️ Hotspots ready:', this.allHotspots.length, 'reports,', Object.keys(this.hotspotsGrouped).length, 'unique locations');
-
-            // Initialize map with real data
             this.initMap();
-
-            // Render hotspot cards
             this.renderHotspotCards();
 
-            // Hide loading state
             if (loadingEl) loadingEl.classList.add('hidden');
         } catch (err) {
             console.error('Error loading hotspots:', err);
@@ -1832,7 +2079,6 @@ async fetchProfileStats() {
             this.initMap();
         }
 
-        // Auto-refresh every 60 seconds
         setInterval(() => {
             if (this.map) {
                 this.refreshMap();
@@ -1856,7 +2102,6 @@ async fetchProfileStats() {
             }
             grouped[key].reports.push(h);
             grouped[key].count = grouped[key].reports.length;
-            // Use highest severity
             if (this.getSeverityLevel(h.severity) > this.getSeverityLevel(grouped[key].severity)) {
                 grouped[key].severity = h.severity;
             }
@@ -1887,19 +2132,16 @@ async fetchProfileStats() {
         const mapElement = document.getElementById('goaMap');
         if (!mapElement) return;
 
-        // Center map on Goa with proper coordinates
         this.map = L.map('goaMap', {
             scrollWheelZoom: true,
             zoomAnimation: true
         }).setView([15.5, 73.8], 9);
 
-        // Add tile layer
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 18,
             attribution: '© OpenStreetMap contributors'
         }).addTo(this.map);
 
-        // Initialize layer groups for filtering
         this.markerLayers = {
             all: L.layerGroup().addTo(this.map),
             high: L.layerGroup(),
@@ -1907,26 +2149,21 @@ async fetchProfileStats() {
             low: L.layerGroup()
         };
 
-        // User's current selection marker (for pins)
         this.userMarker = null;
 
-        // Add map click listener
         this.map.on('click', (e) => {
             const { lat, lng } = e.latlng;
             this.updateLocalReportMarker(lat, lng);
             this.reverseGeocode(lat, lng);
             
-            // Show toast to confirm capture
             this.showToast('Location selected on map ✔', 'success');
             document.getElementById('locationStatus').style.display = 'block';
         });
 
-        // Store markers by location key for easy access
         this.markersByLocation = {};
 
         this.renderMarkers();
 
-        // Fit bounds if we have markers
         if (this.allHotspots && this.allHotspots.length > 0) {
             setTimeout(() => this.fitMapBounds(), 500);
         }
@@ -1940,7 +2177,6 @@ async fetchProfileStats() {
             bounds.extend([h.lat, h.lng]);
         });
 
-        // Add padding
         this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 13 });
     }
 
@@ -1963,7 +2199,6 @@ async fetchProfileStats() {
 
             this.hotspotsGrouped = this.groupHotspotsByLocation(this.allHotspots);
 
-            // Preserve current filter
             const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
 
             this.renderMarkers();
@@ -1983,8 +2218,6 @@ async fetchProfileStats() {
             'low': '#22c55e'
         };
 
-        const color = colors[severity] || '#6b7280';
-
         return L.divIcon({
             html: `<div class="custom-marker ${severity}">●</div>`,
             className: '',
@@ -2001,15 +2234,12 @@ async fetchProfileStats() {
             return;
         }
 
-        // Clear old markers
         Object.values(this.markerLayers).forEach(layer => layer.clearLayers());
         this.markersByLocation = {};
 
-        // Get active filter
         const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
 
         Object.entries(this.hotspotsGrouped).forEach(([key, hotspot]) => {
-            // Skip if doesn't match active filter
             if (activeFilter !== 'all' && hotspot.severity !== activeFilter) {
                 return;
             }
@@ -2018,10 +2248,8 @@ async fetchProfileStats() {
                 icon: this.getMarkerIcon(hotspot.severity)
             });
 
-            // Store marker for easy access
             this.markersByLocation[key] = { marker, hotspot };
 
-            // Create custom popup with better styling
             const lastUpdated = new Date(hotspot.reports[0]?.created_at).toLocaleDateString();
             const popupContent = `
                 <div class="pollution-popup">
@@ -2067,15 +2295,12 @@ async fetchProfileStats() {
         const container = document.getElementById('hotspotsGrid');
         if (!container || !this.hotspotsGrouped) return;
 
-        // Get active filter
         const activeFilter = document.querySelector('.filter-btn.active')?.dataset.filter || 'all';
 
-        // Filter hotspots based on active filter
         const filteredHotspots = Object.values(this.hotspotsGrouped).filter(h =>
             activeFilter === 'all' || h.severity === activeFilter
         );
 
-        // Sort by report count (most affected first)
         filteredHotspots.sort((a, b) => b.count - a.count);
 
         container.innerHTML = filteredHotspots.length
@@ -2132,17 +2357,14 @@ async fetchProfileStats() {
 
         if (!this.map) return;
 
-        // Smooth scroll to map
         const mapElement = document.getElementById('goaMap');
         if (mapElement) {
             mapElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
 
-        // Zoom to marker
         setTimeout(() => {
             this.map.setView([lat, lng], 15, { animate: true });
 
-            // Find and open popup
             const key = `${lat},${lng}`;
             if (this.markersByLocation[key]) {
                 const marker = this.markersByLocation[key].marker;
@@ -2160,7 +2382,6 @@ async fetchProfileStats() {
             );
             const data = await response.json();
             
-            // Build a more specific address string: House/Road, Suburb/Neighbourhood, City
             const addr = data.address || {};
             const parts = [];
             
@@ -2201,7 +2422,6 @@ async fetchProfileStats() {
                 
                 this.updateLocalReportMarker(latitude, longitude);
 
-                // Show feedback
                 if (locationStatus) {
                     locationStatus.textContent = '📍 Location verified via search';
                     locationStatus.style.display = 'block';
@@ -2222,7 +2442,6 @@ async fetchProfileStats() {
     updateLocalReportMarker(lat, lng) {
         if (!this.map) return;
         
-        // Update hidden fields
         document.getElementById('latitude').value = lat;
         document.getElementById('longitude').value = lng;
 
@@ -2240,7 +2459,6 @@ async fetchProfileStats() {
             }).addTo(this.map);
         }
 
-        // Center map on selection with high precision zoom
         this.map.setView([lat, lng], 18, { animate: true });
     }
 
@@ -2258,7 +2476,6 @@ async fetchProfileStats() {
         return d.toLocaleString();
     }
 
-
     /* ---------- MISSIONS ---------- */
     async loadMissions() {
         this.missions = await this.fetchJSON('/api/missions');
@@ -2270,11 +2487,11 @@ async fetchProfileStats() {
         if (!container || !this.missions) return;
 
         const TRUNCATE = 120;
-        const joinedMissions = getJoinedMissions(); // Get joined missions from localStorage
+        const joinedMissions = getJoinedMissions();
 
         container.innerHTML = this.missions.length
             ? this.missions.map(m => {
-                const joined = joinedMissions.includes(String(m.id)); // Check if joined
+                const joined = joinedMissions.includes(String(m.id));
 
                 const joinBtn = joined
                     ? `<button class="btn btn-joined" disabled>✅ Joined</button>`
@@ -2321,24 +2538,20 @@ async fetchProfileStats() {
             }).join('')
             : `<p class="text-center">No missions available yet.</p>`;
     }
-// In script.js - update these methods
 
     openMissionModal(missionId) {
         const mission = this.missions?.find(m => m.id == missionId);
         if (!mission) return;
 
-        // Check if user is already logged in and has already joined
         if (!this.auth.isAuthenticated()) {
             window.location.href = 'login/login.html';
             return;
         }
 
-        // Check if already joined using localStorage
         const joinedMissions = getJoinedMissions();
         if (joinedMissions.includes(String(missionId))) {
             this.showToast('You have already joined this mission! ✅', 'info');
             
-            // Optionally show a different modal or just close
             const modal = document.getElementById('missionModal');
             if (modal) {
                 modal.classList.remove('active');
@@ -2365,12 +2578,10 @@ async fetchProfileStats() {
     }
 
     showJoinForm(missionId) {
-        // Double-check again before showing the form
         const joinedMissions = getJoinedMissions();
         if (joinedMissions.includes(String(missionId))) {
             this.showToast('You have already joined this mission! ✅', 'info');
             
-            // Close the mission modal
             document.getElementById('missionModal')?.classList.remove('active');
             return;
         }
@@ -2381,10 +2592,6 @@ async fetchProfileStats() {
         joinModal.classList.add('active');
         document.getElementById('joinForm').dataset.missionId = missionId;
     }
-
-// In script.js - replace handleJoinMission method
-
-// In script.js - update handleJoinMission method
 
     async handleJoinMission(e) {
         e.preventDefault();
@@ -2399,7 +2606,6 @@ async fetchProfileStats() {
             return;
         }
 
-        // Check localStorage first
         const joinedMissions = getJoinedMissions();
         if (joinedMissions.includes(String(missionId))) {
             this.showToast('You have already joined this mission! ✅', 'info');
@@ -2443,7 +2649,6 @@ async fetchProfileStats() {
                     
                     this.loadMissions();
                     
-                    // ✅ Refresh profile stats if modal is open
                     const settingsModal = document.getElementById('settingsModal');
                     if (settingsModal && settingsModal.classList.contains('active')) {
                         setTimeout(() => this.fetchProfileStats(), 500);
@@ -2455,25 +2660,20 @@ async fetchProfileStats() {
 
             console.log('Join mission success:', data);
 
-            // Persist joined state
             markMissionJoined(missionId);
 
             this.showToast('Successfully joined the mission! A confirmation email has been sent to you. 🌿', 'success');
 
-            // Close modal
             const joinModal = document.getElementById('joinModal');
             if (joinModal) {
                 joinModal.classList.remove('active');
                 joinModal.classList.add('hidden');
             }
 
-            // Reset form
             if (form) form.reset();
 
-            // Re-render missions
             this.loadMissions();
             
-            // ✅ Refresh profile stats if modal is open
             const settingsModal = document.getElementById('settingsModal');
             if (settingsModal && settingsModal.classList.contains('active')) {
                 setTimeout(() => this.fetchProfileStats(), 500);
@@ -2484,6 +2684,7 @@ async fetchProfileStats() {
             this.showToast(err.message || 'Failed to join mission', 'error');
         }
     }
+
     /* ---------- LEADERBOARD ---------- */
     async loadLeaderboard() {
         this.leaderboard = await this.fetchJSON('/api/leaderboard');
@@ -2493,17 +2694,14 @@ async fetchProfileStats() {
     renderLeaderboard() {
         if (!this.leaderboard) return;
 
-        // Update stats
         document.getElementById('totalReports')?.setAttribute('data-count', this.leaderboard.totalReports || 0);
         document.getElementById('totalMissions')?.setAttribute('data-count', this.leaderboard.totalMissions || 0);
         document.getElementById('totalTrees')?.setAttribute('data-count', this.leaderboard.totalTrees || 0);
 
-        // Animate numbers
         this.animateCounter('totalReports', this.leaderboard.totalReports || 0);
         this.animateCounter('totalMissions', this.leaderboard.totalMissions || 0);
         this.animateCounter('totalTrees', this.leaderboard.totalTrees || 0);
 
-        // Render top 3 podium
         const podiumGrid = document.getElementById('podiumGrid');
         if (podiumGrid && this.leaderboard.top3) {
             podiumGrid.innerHTML = this.leaderboard.top3.map((user, idx) => `
@@ -2515,7 +2713,6 @@ async fetchProfileStats() {
             `).join('');
         }
 
-        // Render full leaderboard
         const leaderboardList = document.getElementById('leaderboardList');
         if (leaderboardList && this.leaderboard.list) {
             leaderboardList.innerHTML = this.leaderboard.list.map((user, idx) => `
@@ -2546,17 +2743,14 @@ async fetchProfileStats() {
 
     /* ---------- POLICIES ---------- */
     async loadPolicies() {
-        // Load policies and also get report stats for dynamic tracking
         this.policies = await this.fetchJSON('/api/policies');
         this.reportStats = await this.fetchJSON('/api/report-stats');
         this.renderPolicies();
     }
 
     renderPolicies() {
-        // Use report statistics for policy tracker counts
         if (this.reportStats) {
             const stats = this.reportStats;
-            // Update policy tracker stats based on reports
             const implementedEl = document.getElementById('implementedCount');
             const inProgressEl = document.getElementById('inProgressCount');
             const pendingEl = document.getElementById('pendingCount');
@@ -2568,7 +2762,6 @@ async fetchProfileStats() {
             if (planningEl) planningEl.textContent = stats.rejected || 0;
         }
 
-        // Render policy cards (if policies exist)
         const policiesList = document.getElementById('policiesList');
         if (policiesList && this.policies && this.policies.length > 0) {
             policiesList.innerHTML = this.policies.map(p => `
@@ -2584,36 +2777,6 @@ async fetchProfileStats() {
                     </div>
                 </div>
             `).join('');
-        } else if (policiesList) {
-        //     // Show real report statistics when no policies exist
-        //     const stats = this.reportStats || { total: 0, pending: 0, approved: 0, rejected: 0 };
-        //     policiesList.innerHTML = `
-        //         <div class="policy-card">
-        //             <div class="policy-status in_progress">
-        //                 <span>LIVE TRACKING</span>
-        //             </div>
-        //             <h3>Environmental Reports Tracker</h3>
-        //             <p>Real-time tracking of environmental issues reported by citizens. Reports are reviewed and addressed by authorities.</p>
-        //             <div class="report-stats-grid">
-        //                 <div class="report-stat-item">
-        //                     <div class="report-stat-number">${stats.total}</div>
-        //                     <div class="report-stat-label">Total Reports</div>
-        //                 </div>
-        //                 <div class="report-stat-item report-stat-pending">
-        //                     <div class="report-stat-number">${stats.pending}</div>
-        //                     <div class="report-stat-label">Pending Review</div>
-        //                 </div>
-        //                 <div class="report-stat-item report-stat-approved">
-        //                     <div class="report-stat-number">${stats.approved}</div>
-        //                     <div class="report-stat-label">Approved</div>
-        //                 </div>
-        //                 <div class="report-stat-item report-stat-rejected">
-        //                     <div class="report-stat-number">${stats.rejected}</div>
-        //                     <div class="report-stat-label">Rejected</div>
-        //                 </div>
-        //             </div>
-        //         </div>
-        //     `;
         }
     }
 
@@ -2676,7 +2839,6 @@ async fetchProfileStats() {
 
         let html = '';
 
-        // Experience cards
         if (this.experiences && this.experiences.length > 0) {
             html += this.experiences.map(e => `
                 <div class="eco-spot-card">
@@ -2695,7 +2857,6 @@ async fetchProfileStats() {
             `).join('');
         }
 
-        // Eco spot cards
         if (this.ecoSpots && this.ecoSpots.length > 0) {
             html += this.ecoSpots.map(spot => `
                 <div class="eco-spot-card">
@@ -2738,7 +2899,6 @@ async fetchProfileStats() {
                 return;
             }
 
-            // Create or update modal
             let modal = document.getElementById('ecoSpotDetailModal');
             if (!modal) {
                 modal = document.createElement('div');
@@ -2752,7 +2912,6 @@ async fetchProfileStats() {
                 `;
                 document.body.appendChild(modal);
 
-                // Close modal handlers
                 modal.querySelector('.close-modal').onclick = () => {
                     modal.style.display = 'none';
                 };
@@ -2814,14 +2973,12 @@ async fetchProfileStats() {
     showSensitiveContentAlert() {
         console.log('⚠️ showSensitiveContentAlert TRIGGERED');
 
-        // Remove existing if any (to ensure fresh render with correct styles)
         const existing = document.getElementById('sensitiveContentModal');
         if (existing) existing.remove();
 
         const modal = document.createElement('div');
         modal.id = 'sensitiveContentModal';
 
-        // Critical: Strict inline styles to force visibility overlay
         modal.className = 'modal active';
         Object.assign(modal.style, {
             position: 'fixed',
@@ -2893,7 +3050,6 @@ async fetchProfileStats() {
 
         document.body.appendChild(modal);
 
-        // Focus logic
         const btn = document.getElementById('closeSensitiveModalBtn');
         if (btn) {
             btn.onclick = () => {
@@ -2903,7 +3059,6 @@ async fetchProfileStats() {
             btn.focus();
         }
 
-        // Close on outside click
         modal.onclick = (e) => {
             if (e.target === modal) {
                 modal.classList.add('closing');
@@ -2918,12 +3073,10 @@ async fetchProfileStats() {
 
         console.log('🎯 Filtering markers by:', filter);
 
-        // Clear all layers
         Object.values(this.markerLayers).forEach(layer => {
             this.map.removeLayer(layer);
         });
 
-        // Show filtered markers
         if (filter === 'all') {
             this.markerLayers.all.addTo(this.map);
         } else if (this.markerLayers[filter]) {
@@ -2946,7 +3099,6 @@ async fetchProfileStats() {
         setTimeout(() => toast.classList.remove('active'), 8000);
     }
 
-    // Preview/remove helpers moved here from inline HTML
     previewImage(input) {
         const preview = document.getElementById('imagePreview');
         const uploadArea = document.getElementById('uploadArea');
@@ -2982,17 +3134,14 @@ async fetchProfileStats() {
     }
 
     showLoginModal() {
-        // Redirect to login page instead of showing modal
         window.location.href = 'login/login.html';
     }
 
     showSignupModal() {
-        // Redirect to signup page instead of showing modal
         window.location.href = 'login/signup.html';
     }
 
     initViewOnMapButtons() {
-        // Listen for dynamically added "View on Map" buttons
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('view-on-map-btn')) {
                 const latLng = e.target.dataset.latlng;
@@ -3005,7 +3154,6 @@ async fetchProfileStats() {
 
     closeModal() {
         document.querySelectorAll('.modal').forEach(m => {
-            // Don't close if it's already closing or hidden
             if (m.classList.contains('closing') || m.classList.contains('hidden')) return;
             
             m.classList.remove('active');
@@ -3018,28 +3166,23 @@ async fetchProfileStats() {
     }
 
     initIntersectionObserver() {
-        // Get all sections
         const sections = document.querySelectorAll('section[id]');
 
-        // Create Intersection Observer options
         const observerOptions = {
             root: null,
-            rootMargin: '0px 0px -50% 0px',  // Trigger when section is 50% visible
+            rootMargin: '0px 0px -50% 0px',
             threshold: 0
         };
 
-        // Callback function when sections enter/leave viewport
         const observerCallback = (entries) => {
             entries.forEach((entry) => {
                 if (entry.isIntersecting) {
                     const sectionId = entry.target.id;
 
-                    // Remove active class from all nav links
                     document.querySelectorAll('.nav-link').forEach(link => {
                         link.classList.remove('active');
                     });
 
-                    // Add active class to matching nav link
                     const activeLink = document.querySelector(`.nav-link[data-section="${sectionId}"]`);
                     if (activeLink) {
                         activeLink.classList.add('active');
@@ -3047,16 +3190,11 @@ async fetchProfileStats() {
                 }
             });
         };
-        
 
-        // Create observer and observe all sections
         const observer = new IntersectionObserver(observerCallback, observerOptions);
         sections.forEach(section => observer.observe(section));
     }
 
-    
-
-    // Add this helper method to GoaEcoGuard class
     previewImageFromCamera(file) {
         const preview = document.getElementById('imagePreview');
         const uploadArea = document.getElementById('uploadArea');
@@ -3081,22 +3219,19 @@ async fetchProfileStats() {
             reader.readAsDataURL(file);
         }
     }
-//leaf count 
+
     initLeafParticles() {
         const lc = document.getElementById('leafContainer');
         if (!lc) return;
 
-        // Clean existing
         lc.innerHTML = '';
 
-        // Create particles
         const count = 10;
         for (let i = 0; i < count; i++) {
             const l = document.createElement('div');
             l.className = 'leaf-particle';
             
-            // Randomize properties
-            const left = Math.random() * 100; // full width
+            const left = Math.random() * 100;
             const duration = 10 + Math.random() * 16;
             const delay = Math.random() * 16;
             const opacity = 0.12 + Math.random() * 0.25;
@@ -3105,7 +3240,7 @@ async fetchProfileStats() {
             l.style.cssText = `
                 left: ${left}%;
                 animation-duration: ${duration}s;
-                animation-delay: -${delay}s; /* negative delay to start mid-animation */
+                animation-delay: -${delay}s;
                 opacity: ${opacity};
                 transform: scale(${scale});
             `;
@@ -3115,15 +3250,12 @@ async fetchProfileStats() {
     }
 }
 
-
-
 /* ---------- START ---------- */
 let app;
 document.addEventListener('DOMContentLoaded', () => {
     app = new GoaEcoGuard();
-    window.app = app; // Make app globally accessible for onclick handlers
+    window.app = app;
 
-    // expose helpers for inline attributes
     window.previewImage = (input) => app.previewImage(input);
     window.removeImage = () => app.removeImage();
 
