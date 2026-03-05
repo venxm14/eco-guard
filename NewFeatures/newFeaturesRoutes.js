@@ -1,7 +1,5 @@
 // ============================================
 // Goa Eco-Guard: NewFeatures Backend Routes
-// A self-contained Express Router — plug in with:
-//   app.use(require('./NewFeatures/newFeaturesRoutes'));
 // ============================================
 
 const express = require('express');
@@ -16,6 +14,7 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
+
 const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY
@@ -24,16 +23,8 @@ const supabaseAdmin = createClient(
 // ---------- Multer (memory) ----------
 const upload = multer({ storage: multer.memoryStorage() });
 
-// ---------- Auth Middleware (mirrors main server.js) ----------
-function authenticateToken(req, res, next) {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Token required' });
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user;
-    next();
-  });
-}
+// ---------- Auth Middleware ----------
+const { authenticateToken } = require('../authMiddleware');
 
 // ---------- Supabase Storage Helper ----------
 async function uploadToSupabase(buffer, folder, width = 1200, height = 800) {
@@ -48,25 +39,17 @@ async function uploadToSupabase(buffer, folder, width = 1200, height = 800) {
       .from('eco-images')
       .upload(fileName, jpegBuffer, { contentType: 'image/jpeg', upsert: false });
 
-    if (error) { console.error('❌ NF Storage upload error:', error.message); return null; }
+    if (error) { 
+      console.error('❌ Storage upload error:', error.message); 
+      return null; 
+    }
 
     const { data } = supabaseAdmin.storage.from('eco-images').getPublicUrl(fileName);
     return data.publicUrl;
   } catch (err) {
-    console.error('❌ NF uploadToSupabase error:', err.message);
+    console.error('❌ uploadToSupabase error:', err.message);
     return null;
   }
-}
-
-// ---------- Haversine Distance (km) ----------
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 /* ===============================
@@ -74,32 +57,83 @@ function haversineKm(lat1, lon1, lat2, lon2) {
 ================================ */
 
 // GET /api/stories — paginated story feed
+// In newFeaturesRoutes.js - update the GET /api/stories endpoint
+
 router.get('/api/stories', async (req, res) => {
   try {
+    console.log('📖 Fetching stories with admin client...');
+    
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const offset = (page - 1) * limit;
 
-    const { data, error, count } = await supabase
+    // First, get the stories without the join to see raw data
+    const { data: rawData, error: rawError } = await supabaseAdmin
       .from('eco_stories')
-      .select('*, users!user_id(name)', { count: 'exact' })
+      .select('*')
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (error) {
-      console.error('❌ Error fetching stories:', error);
-      return res.json({ stories: [], total: 0 });
+    if (rawError) {
+      console.error('❌ Error fetching raw stories:', rawError);
+      return res.status(500).json({ error: rawError.message });
+    }
+
+    console.log(`✅ Raw stories fetched: ${rawData?.length || 0}`);
+    if (rawData && rawData.length > 0) {
+      console.log('Sample raw story - user_id:', rawData[0].user_id);
+    }
+
+    // Now try with join for user data
+    const { data: joinedData, error: joinedError } = await supabaseAdmin
+      .from('eco_stories')
+      .select(`
+        *,
+        users!user_id (
+          id,
+          name,
+          email,
+          is_verified
+        )
+      `)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    // Get total count
+    const { count, error: countError } = await supabaseAdmin
+      .from('eco_stories')
+      .select('*', { count: 'exact', head: true });
+
+    // Use raw data if join fails, otherwise use joined data
+    let stories = rawData || [];
+    
+    // If join succeeded, use that data
+    if (!joinedError && joinedData) {
+      stories = joinedData;
     }
 
     res.json({
-      stories: data || [],
+      stories: stories,
       total: count || 0,
       page,
-      totalPages: Math.ceil((count || 0) / limit)
+      totalPages: Math.ceil((count || 0) / limit),
+      debug: {
+        raw_count: rawData?.length || 0,
+        joined_count: joinedData?.length || 0,
+        raw_sample: rawData?.[0] ? {
+          id: rawData[0].id,
+          user_id: rawData[0].user_id,
+          title: rawData[0].title
+        } : null
+      }
     });
   } catch (err) {
-    console.error('Stories fetch error:', err);
-    res.json({ stories: [], total: 0 });
+    console.error('❌ Stories fetch error:', err);
+    res.status(500).json({ 
+      error: err.message,
+      stories: [], 
+      total: 0 
+    });
   }
 });
 
@@ -113,10 +147,17 @@ router.post(
   ]),
   async (req, res) => {
     try {
+      console.log('📝 Creating new story for user:', req.user?.userId);
+      
       const { title, description, mission_id } = req.body;
 
       if (!title) {
         return res.status(400).json({ error: 'Title is required' });
+      }
+
+      if (!req.user || !req.user.userId) {
+        console.error('❌ No user ID in request');
+        return res.status(401).json({ error: 'User not authenticated' });
       }
 
       let beforeUrl = null;
@@ -124,9 +165,11 @@ router.post(
 
       if (req.files?.before_image?.[0]) {
         beforeUrl = await uploadToSupabase(req.files.before_image[0].buffer, 'stories');
+        console.log('✅ Before image uploaded');
       }
       if (req.files?.after_image?.[0]) {
         afterUrl = await uploadToSupabase(req.files.after_image[0].buffer, 'stories');
+        console.log('✅ After image uploaded');
       }
 
       const insertData = {
@@ -135,13 +178,25 @@ router.post(
         description: description || null,
         mission_id: mission_id || null,
         before_image: beforeUrl,
-        after_image: afterUrl
+        after_image: afterUrl,
+        likes_count: 0,
+        comments_count: 0
       };
+
+      console.log('📤 Inserting story data');
 
       const { data, error } = await supabaseAdmin
         .from('eco_stories')
         .insert([insertData])
-        .select('*, users!user_id(name)')
+        .select(`
+          *,
+          users!user_id (
+            id,
+            name,
+            email,
+            is_verified
+          )
+        `)
         .single();
 
       if (error) {
@@ -149,20 +204,19 @@ router.post(
         return res.status(500).json({ error: error.message });
       }
 
-      console.log('✅ Story created:', data.id);
+      console.log('✅ Story created successfully:', data.id);
       res.json({ success: true, data });
     } catch (err) {
-      console.error('Story creation error:', err);
-      res.status(500).json({ error: 'Failed to create story' });
+      console.error('❌ Story creation error:', err);
+      res.status(500).json({ error: 'Failed to create story: ' + err.message });
     }
   }
 );
 
 // POST /api/stories/:id/like — increment likes
-router.post('/api/stories/:id/like', async (req, res) => {
+router.post('/api/stories/:id/like', authenticateToken, async (req, res) => {
   try {
-    // Fetch current count
-    const { data: story, error: fetchErr } = await supabase
+    const { data: story, error: fetchErr } = await supabaseAdmin
       .from('eco_stories')
       .select('likes_count')
       .eq('id', req.params.id)
@@ -172,14 +226,16 @@ router.post('/api/stories/:id/like', async (req, res) => {
       return res.status(404).json({ error: 'Story not found' });
     }
 
+    const newCount = (story.likes_count || 0) + 1;
+    
     const { error } = await supabaseAdmin
       .from('eco_stories')
-      .update({ likes_count: (story.likes_count || 0) + 1 })
+      .update({ likes_count: newCount })
       .eq('id', req.params.id);
 
     if (error) return res.status(500).json({ error: error.message });
 
-    res.json({ success: true, likes_count: (story.likes_count || 0) + 1 });
+    res.json({ success: true, likes_count: newCount });
   } catch (err) {
     res.status(500).json({ error: 'Failed to like story' });
   }
@@ -192,19 +248,37 @@ router.post('/api/stories/:id/like', async (req, res) => {
 // GET /api/sightings — all sightings for map layer
 router.get('/api/sightings', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    console.log('🦎 Fetching sightings...');
+    
+    const { data, error } = await supabaseAdmin
       .from('eco_sightings')
-      .select('*, users!user_id(name, is_verified)')
+      .select(`
+        *,
+        users!user_id (
+          id,
+          name,
+          email,
+          is_verified
+        )
+      `)
       .order('created_at', { ascending: false });
 
     if (error) {
       console.error('❌ Error fetching sightings:', error);
-      return res.json([]);
+      return res.status(500).json({ 
+        error: error.message,
+        sightings: [] 
+      });
     }
+
+    console.log(`✅ Successfully fetched ${data?.length || 0} sightings`);
     res.json(data || []);
   } catch (err) {
-    console.error('Sightings fetch error:', err);
-    res.json([]);
+    console.error('❌ Sightings fetch error:', err);
+    res.status(500).json({ 
+      error: err.message,
+      sightings: [] 
+    });
   }
 });
 
@@ -215,15 +289,26 @@ router.post(
   upload.single('image'),
   async (req, res) => {
     try {
+      console.log('📝 Creating new sighting for user:', req.user?.userId);
+      
       const { species_name, description, latitude, longitude, location } = req.body;
 
-      if (!species_name || !latitude || !longitude) {
-        return res.status(400).json({ error: 'Species name and location are required' });
+      if (!species_name) {
+        return res.status(400).json({ error: 'Species name is required' });
+      }
+      
+      if (!latitude || !longitude) {
+        return res.status(400).json({ error: 'Location coordinates are required' });
+      }
+
+      if (!req.user || !req.user.userId) {
+        return res.status(401).json({ error: 'User not authenticated' });
       }
 
       let imageUrl = null;
       if (req.file) {
         imageUrl = await uploadToSupabase(req.file.buffer, 'sightings');
+        console.log('✅ Sighting image uploaded');
       }
 
       const insertData = {
@@ -233,13 +318,23 @@ router.post(
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         location: location || null,
-        image_url: imageUrl
+        image_url: imageUrl,
+        likes_count: 0,
+        comments_count: 0
       };
 
       const { data, error } = await supabaseAdmin
         .from('eco_sightings')
         .insert([insertData])
-        .select('*, users!user_id(name)')
+        .select(`
+          *,
+          users!user_id (
+            id,
+            name,
+            email,
+            is_verified
+          )
+        `)
         .single();
 
       if (error) {
@@ -247,11 +342,11 @@ router.post(
         return res.status(500).json({ error: error.message });
       }
 
-      console.log('✅ Sighting created:', data.id);
+      console.log('✅ Sighting created successfully:', data.id);
       res.json({ success: true, data });
     } catch (err) {
-      console.error('Sighting creation error:', err);
-      res.status(500).json({ error: 'Failed to submit sighting' });
+      console.error('❌ Sighting creation error:', err);
+      res.status(500).json({ error: 'Failed to submit sighting: ' + err.message });
     }
   }
 );
@@ -271,10 +366,21 @@ router.get('/api/alerts/nearby', async (req, res) => {
       return res.status(400).json({ error: 'lat and lng query params required' });
     }
 
+    // Haversine formula
+    function haversineKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
     // Fetch recent critical/high severity reports from last 24 hours
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    const { data: reports, error } = await supabase
+    const { data: reports, error } = await supabaseAdmin
       .from('eco_reports')
       .select('id, location, latitude, longitude, description, severity, status, created_at')
       .not('latitude', 'is', null)
@@ -297,68 +403,11 @@ router.get('/api/alerts/nearby', async (req, res) => {
       .filter(r => r.distance_km <= radiusKm)
       .sort((a, b) => a.distance_km - b.distance_km);
 
+    console.log(`📍 Found ${nearby.length} nearby alerts within ${radiusKm}km`);
     res.json({ alerts: nearby });
   } catch (err) {
-    console.error('Proximity alert error:', err);
+    console.error('❌ Proximity alert error:', err);
     res.json({ alerts: [] });
-  }
-});
-
-/* ===============================
-   4. ADMIN MANAGEMENT
-================================ */
-
-// GET /api/admin/stories — all stories (admin)
-router.get('/api/admin/stories', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    const { data, error } = await supabase
-      .from('eco_stories')
-      .select('*, users!user_id(name, email)')
-      .order('created_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
-    res.json(data || []);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE /api/admin/stories/:id — delete a story (admin)
-router.delete('/api/admin/stories/:id', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    const { error } = await supabaseAdmin.from('eco_stories').delete().eq('id', req.params.id);
-    if (error) return res.status(400).json({ error: error.message });
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/admin/sightings — all sightings (admin)
-router.get('/api/admin/sightings', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    const { data, error } = await supabase
-      .from('eco_sightings')
-      .select('*, users!user_id(name, email)')
-      .order('created_at', { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
-    res.json(data || []);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE /api/admin/sightings/:id — delete a sighting (admin)
-router.delete('/api/admin/sightings/:id', authenticateToken, async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    const { error } = await supabaseAdmin.from('eco_sightings').delete().eq('id', req.params.id);
-    if (error) return res.status(400).json({ error: error.message });
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
 });
 

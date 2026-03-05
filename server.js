@@ -57,6 +57,9 @@ app.use('/admin', express.static(path.join(__dirname, 'admin')));
 app.use('/login', express.static(path.join(__dirname, 'login')));
 app.use(express.static(path.join(__dirname)));
 
+// Make sure this is at the top of server.js
+
+
 /* ===============================
    SUPABASE
 ================================ */
@@ -82,6 +85,51 @@ console.log('✅ Supabase clients initialized (URL:', process.env.SUPABASE_URL ?
 /* ===============================
    NETWORK DIAGNOSTICS (for debugging)
 ================================ */
+// Add this to server.js - table structure debug endpoint
+// Replace the debug endpoint with this simpler version
+// Update the debug endpoint to use supabaseAdmin
+app.get('/api/debug/table-structure', async (req, res) => {
+  try {
+    console.log('🔍 Debug: Checking eco_stories table with admin client');
+    
+    // Use supabaseAdmin which bypasses RLS
+    const { data, error } = await supabaseAdmin
+      .from('eco_stories')
+      .select('*')
+      .limit(10);
+
+    if (error) {
+      console.error('❌ Debug query error:', error);
+      return res.status(500).json({ 
+        error: error.message,
+        code: error.code
+      });
+    }
+
+    console.log(`✅ Admin query found ${data?.length || 0} stories`);
+    
+    res.json({
+      success: true,
+      story_count: data?.length || 0,
+      stories: data || [],
+      message: 'Using admin client'
+    });
+    
+  } catch (err) {
+    console.error('❌ Debug endpoint error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// Add this to server.js - simple test endpoint
+app.get('/api/test/ping', (req, res) => {
+  res.json({ 
+    message: 'Server is running',
+    time: new Date().toISOString(),
+    supabase_url: process.env.SUPABASE_URL ? 'Set' : 'Not set',
+    supabase_key: process.env.SUPABASE_KEY ? 'Set' : 'Not set'
+  });
+});
+
 app.get('/api/debug-network', async (req, res) => {
   const diagnostic = {
     supabaseUrl: process.env.SUPABASE_URL || 'MISSING',
@@ -177,23 +225,7 @@ async function uploadToSupabase(buffer, folder, width = 1200, height = 800) {
 /* ===============================
    AUTH MIDDLEWARE
 ================================ */
-const authenticateToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'Token required' });
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user;
-    next();
-  });
-};
-
-const isAdmin = (req, res, next) => {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access only' });
-  }
-  next();
-};
+const { authenticateToken, isAdmin } = require('./authMiddleware');
 
 /* ===============================
    EMAIL HELPER
@@ -414,6 +446,16 @@ async function sendMissionEmail({ name, email, missionTitle, missionDate, missio
   await emailTransporter.sendMail(mailOptions);
 }
 
+// for stories
+app.get('/api/test/auth', authenticateToken, (req, res) => {
+  console.log('✅ Test auth endpoint called');
+  console.log('req.user:', req.user);
+  res.json({ 
+    success: true, 
+    user: req.user,
+    message: 'Authentication working!'
+  });
+});
 /* ===============================
    HEALTH
 ================================ */
@@ -549,11 +591,51 @@ app.post('/api/auth/login', async (req, res) => {
 /* ===============================
    USER PROFILE & STATS
 ================================ */
+// In server.js - add debug endpoint
 
-// GET /api/profile/stats - Get all stats for specific user
+app.get('/api/debug/missions/:email', async (req, res) => {
+  try {
+    const { email } = req.params;
+    
+    const { data, error } = await supabase
+      .from('mission_registrations')
+      .select(`
+        *,
+        missions:mission_id (*)
+      `)
+      .eq('email', email.toLowerCase());
+      
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+    
+    res.json({
+      email,
+      count: data?.length || 0,
+      registrations: data || []
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/profile/stats/:userId - Get all stats for specific user
 app.get('/api/profile/stats/:userId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
+    
+    // Get user email first
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', userId)
+      .single();
+      
+    if (userError) {
+      console.error('❌ Error fetching user email:', userError);
+    }
+    
+    const email = userData?.email;
 
     // 1. Reports detailed
     const { data: reportsData, count: reportsCount } = await supabase
@@ -571,31 +653,66 @@ app.get('/api/profile/stats/:userId', authenticateToken, async (req, res) => {
       .order('created_at', { ascending: false });
 
     // 3. Stories detailed
-    const { data: storiesData, count: storiesCount } = await supabase
+    const { data: storiesData, error: storiesError, count: storiesCount } = await supabaseAdmin  // ← Use supabaseAdmin
       .from('eco_stories')
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
-    // 4. Missions count (joined)
-    let email = req.user.email;
-    if (!email) {
-        const { data: userData } = await supabase.from('users').select('email').eq('id', userId).single();
-        email = userData?.email;
+    if (storiesError) {
+      console.error('❌ Stories fetch error in profile:', storiesError);
+    } else {
+      console.log(`✅ Found ${storiesCount || 0} stories for user ${userId} in profile`);
+      if (storiesData && storiesData.length > 0) {
+        console.log('📋 Sample profile story:', storiesData[0]);
+      }
     }
+// 4. Missions joined - FIXED QUERY (clean version without comments)
+      let missions = [];
+      let missionsCount = 0;
 
-    const { data: missions } = await supabase
-      .from('mission_registrations')
-      .select('mission_id, created_at, missions(title, date, location)')
-      .eq('email', email)
-      .order('created_at', { ascending: false });
+      if (email) {
+        console.log(`📧 Fetching missions for email: ${email}`);
+        
+        // Clean select string - no comments inside
+        const { data: missionsData, error: missionsError } = await supabase
+          .from('mission_registrations')
+          .select(`
+            id,
+            mission_id,
+            registered_at,
+            missions:mission_id (
+              id,
+              title,
+              description,
+              date,
+              location,
+              image
+            )
+          `)
+          .eq('email', email)
+          .order('registered_at', { ascending: false });
 
+        if (missionsError) {
+          console.error('❌ Missions fetch error:', missionsError);
+          console.error('❌ Error details:', JSON.stringify(missionsError, null, 2));
+        } else {
+          missions = missionsData || [];
+          missionsCount = missions.length;
+          console.log(`✅ Found ${missionsCount} missions for user ${email}`);
+          if (missionsCount > 0) {
+            console.log('📋 First mission:', missions[0]);
+          }
+        }
+      } else {
+        console.warn('⚠️ No email found for user:', userId);
+      }    
     res.json({
       counts: {
         reports: reportsCount || 0,
         sightings: sightingsCount || 0,
         stories: storiesCount || 0,
-        missions: missions?.length || 0
+        missions: missionsCount || 0
       },
       details: {
         reports: reportsData || [],
@@ -605,9 +722,44 @@ app.get('/api/profile/stats/:userId', authenticateToken, async (req, res) => {
       }
     });
   } catch (err) {
+    console.error('❌ Profile stats error:', err);
     res.status(500).json({ error: err.message });
   }
 });
+
+
+
+// Add this to server.js - a completely new simplified stories endpoint
+app.get('/api/simple-stories', async (req, res) => {
+  try {
+    console.log('📖 Fetching stories with simple endpoint...');
+    
+    // Direct query without any joins
+    const { data, error } = await supabase
+      .from('eco_stories')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ Error in simple stories:', error);
+      return res.json([]);
+    }
+
+    console.log(`✅ Simple stories found: ${data?.length || 0}`);
+    res.json(data || []);
+  } catch (err) {
+    console.error('❌ Simple stories error:', err);
+    res.json([]);
+  }
+});
+
+
+
+
+
+
+
+
 
 // PUT /api/profile/update - Update name and phone
 app.put('/api/profile/update', authenticateToken, async (req, res) => {

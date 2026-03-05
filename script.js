@@ -155,6 +155,32 @@ class AuthManager {
         return this.token ? { Authorization: `Bearer ${this.token}` } : {};
     }
 
+    /**
+     * Wrapper for fetch that automatically attaches the auth header
+     * and handles 401 (Unauthorized) / 403 (Forbidden) errors globally.
+     */
+    async apiFetch(endpoint, options = {}) {
+        const headers = {
+            ...options.headers,
+            ...this.getAuthHeader()
+        };
+
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+            ...options,
+            headers
+        });
+
+        if (res.status === 401 || res.status === 403) {
+            console.warn(`[Auth] Session expired or invalid token (Status ${res.status}). Logging out...`);
+            alert("Your session has expired. Please log in again.");
+            this.logout();
+            throw new Error("Session expired");
+        }
+
+        return res;
+    }
+
+
     async login(email, password) {
         const res = await fetch(`${API_BASE}/api/auth/login`, {
             method: 'POST',
@@ -825,9 +851,8 @@ class GoaEcoGuard {
         }
 
         try {
-            const res = await fetch(`${API_BASE}/api/report`, {
+            const res = await this.auth.apiFetch('/api/report', {
                 method: 'POST',
-                headers: this.auth.getAuthHeader(),
                 body: formData
             });
 
@@ -1033,9 +1058,9 @@ class GoaEcoGuard {
 
         if (action === 'like') {
             try {
-                const res = await fetch(`${API_BASE}/api/social/like`, {
+                const res = await this.auth.apiFetch('/api/social/like', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...this.auth.getAuthHeader() },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ item_id: itemId, item_type: itemType })
                 });
                 const data = await res.json();
@@ -1070,9 +1095,9 @@ class GoaEcoGuard {
             if (commentary === null) return; // cancelled
 
             try {
-                const res = await fetch(`${API_BASE}/api/social/repost`, {
+                const res = await this.auth.apiFetch('/api/social/repost', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...this.auth.getAuthHeader() },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ original_item_id: itemId, item_type: itemType, commentary })
                 });
                 const data = await res.json();
@@ -1130,9 +1155,9 @@ class GoaEcoGuard {
         if (!this.auth.isAuthenticated()) { this.showToast('Please login to reply', 'error'); return; }
 
         try {
-            const res = await fetch(`${API_BASE}/api/social/comment`, {
+            const res = await this.auth.apiFetch('/api/social/comment', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...this.auth.getAuthHeader() },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ item_id: itemId, item_type: itemType, text })
             });
             const data = await res.json();
@@ -1180,21 +1205,6 @@ class GoaEcoGuard {
         
         // Logout
         logoutBtn?.addEventListener('click', () => this.auth.logout());
-
-        // Dark mode logic (moved to main body init but kept toggle listener if exists)
-        const darkModeToggle = document.getElementById('darkModeToggle');
-        if (darkModeToggle) {
-            darkModeToggle.checked = document.body.classList.contains('dark');
-            darkModeToggle.addEventListener('change', (e) => {
-                if (e.target.checked) {
-                    document.body.classList.add('dark');
-                    localStorage.setItem('theme', 'dark');
-                } else {
-                    document.body.classList.remove('dark');
-                    localStorage.setItem('theme', 'light');
-                }
-            });
-        }
 
         // Start polling for notifications
         if (this.auth.isAuthenticated()) {
@@ -1258,74 +1268,136 @@ class GoaEcoGuard {
 
     async openProfileModal() {
         const modal = document.getElementById('settingsModal');
-        if (!modal) return;
+        if (!modal) {
+            console.error('❌ Settings modal not found');
+            return;
+        }
 
         if (!this.auth.isAuthenticated()) {
             window.location.href = 'login/login.html';
             return;
         }
 
-        // Update static info
-        const user = this.auth.user;
-        const initial = user.name.charAt(0).toUpperCase();
-        
-        const dashInitial = document.getElementById('dashboardInitial');
-        const dashName = document.getElementById('dashboardName');
-        const dashEmail = document.getElementById('dashboardEmail');
-        if (dashInitial) dashInitial.innerText = initial;
-        if (dashName) dashName.innerText = user.name;
-        if (dashEmail) dashEmail.innerText = user.email;
-        
-        // Update account section
-        const accName = document.getElementById('accountName');
-        const accEmail = document.getElementById('accountEmail');
-        const accPhone = document.getElementById('accountPhone');
-        if (accName) accName.innerText = user.name;
-        if (accEmail) accEmail.innerText = user.email;
-        if (accPhone) accPhone.innerText = user.phone || 'Not provided';
-
-        // Reset tabs
-        this.switchDashboardTab('impact');
-        
-        // Open modal
-        modal.classList.add('active');
-
-        // Fetch stats & details
-        this.fetchProfileStats();
-    }
-
-    async fetchProfileStats() {
         try {
-            console.log('📊 Fetching detailed dashboard stats...');
-            const res = await fetch(`${API_BASE}/api/profile/stats/${this.auth.user.id}`, {
-                headers: this.auth.getAuthHeader()
-            });
-            const data = await res.json();
-            if (res.ok) {
-                // Update Counts
-                const idMap = {
-                    'dashStatReports': data.counts.reports,
-                    'dashStatSightings': data.counts.sightings,
-                    'dashStatStories': data.counts.stories,
-                    'dashStatMissions': data.counts.missions
-                };
-                Object.entries(idMap).forEach(([id, val]) => {
-                    const el = document.getElementById(id);
-                    if (el) el.innerText = val;
-                });
+            // Update static info
+            const user = this.auth.user;
+            const initial = user.name.charAt(0).toUpperCase();
+            
+            const dashInitial = document.getElementById('dashboardInitial');
+            const dashName = document.getElementById('dashboardName');
+            const dashEmail = document.getElementById('dashboardEmail');
+            const accName = document.getElementById('accountName');
+            const accEmail = document.getElementById('accountEmail');
+            const accPhone = document.getElementById('accountPhone');
+            
+            if (dashInitial) dashInitial.innerText = initial;
+            if (dashName) dashName.innerText = user.name;
+            if (dashEmail) dashEmail.innerText = user.email;
+            if (accName) accName.innerText = user.name;
+            if (accEmail) accEmail.innerText = user.email;
+            if (accPhone) accPhone.innerText = user.phone || 'Not provided';
 
-                // Render Lists
-                this.renderDashboardList('reports', data.details.reports, 'dashboardReportsList', 'assignment', 'No reports filed yet.', 'START A REPORT', 'eco-reporting');
-                this.renderDashboardList('sightings', data.details.sightings, 'dashboardSightingsList', 'visibility', 'No sightings logged.', 'Log a Sighting', 'eco-reporting');
-                this.renderDashboardList('stories', data.details.stories, 'dashboardStoriesList', 'auto_stories', 'No stories shared.', 'Tell a Story', 'eco-reporting');
-                this.renderDashboardList('missions', data.details.missions, 'dashboardMissionsList', 'groups', 'No missions joined.', 'Browse Missions', 'volunteer');
-
-                // Fetch and Render Interactions (Comments)
-                this.fetchDashboardComments();
-            }
-        } catch (err) { console.error('Stats fetch error:', err); }
+            // Reset modal state
+            modal.classList.remove('closing', 'hidden');
+            modal.style.display = ''; // Clear any inline display styles
+            
+            // Reset tabs to impact view
+            this.switchDashboardTab('impact');
+            
+            // Show modal
+            modal.classList.add('active');
+            
+            // Fetch stats
+            await this.fetchProfileStats();
+            
+            console.log('✅ Profile modal opened successfully');
+        } catch (err) {
+            console.error('❌ Error opening profile modal:', err);
+            this.showToast('Could not open profile', 'error');
+        }
     }
 
+// In script.js - update the fetchProfileStats method
+
+async fetchProfileStats() {
+  try {
+    console.log('📊 Fetching detailed dashboard stats...');
+    const res = await this.auth.apiFetch(`/api/profile/stats/${this.auth.user.id}`);
+    const data = await res.json();
+    
+    if (res.ok) {
+      console.log('✅ Profile stats received:', data);
+      
+      // Update Counts
+      const statMappings = [
+        { id: 'dashStatReports', value: data.counts?.reports || 0 },
+        { id: 'dashStatSightings', value: data.counts?.sightings || 0 },
+        { id: 'dashStatStories', value: data.counts?.stories || 0 },
+        { id: 'dashStatMissions', value: data.counts?.missions || 0 }
+      ];
+      
+      statMappings.forEach(({ id, value }) => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.innerText = value;
+          console.log(`✅ Updated ${id}: ${value}`);
+        } else {
+          console.warn(`⚠️ Element ${id} not found`);
+        }
+      });
+      // Log missions data for debugging
+      if (data.details?.missions) {
+        console.log('🎯 Missions data:', data.details.missions);
+      }
+
+      // Render Lists with proper data
+      this.renderDashboardList(
+        'reports', 
+        data.details?.reports || [], 
+        'dashboardReportsList', 
+        'assignment', 
+        'No reports filed yet.', 
+        'START A REPORT', 
+        'eco-reporting'
+      );
+      
+      this.renderDashboardList(
+        'sightings', 
+        data.details?.sightings || [], 
+        'dashboardSightingsList', 
+        'visibility', 
+        'No sightings logged.', 
+        'Log a Sighting', 
+        'eco-reporting'
+      );
+      
+      this.renderDashboardList(
+        'stories', 
+        data.details?.stories || [], 
+        'dashboardStoriesList', 
+        'auto_stories', 
+        'No stories shared.', 
+        'Tell a Story', 
+        'eco-reporting'
+      );
+      
+      this.renderDashboardList(
+        'missions', 
+        data.details?.missions || [], 
+        'dashboardMissionsList', 
+        'groups', 
+        'No missions joined.', 
+        'Browse Missions', 
+        'volunteer'
+      );
+
+      // Fetch and Render Interactions (Comments)
+      this.fetchDashboardComments();
+    }
+  } catch (err) { 
+    console.error('❌ Stats fetch error:', err); 
+  }
+}
     async fetchDashboardComments() {
         try {
             const listEl = document.getElementById('dashboardCommentsList');
@@ -1415,12 +1487,92 @@ class GoaEcoGuard {
         }).join('');
     }
 
+// In script.js - update the missions section in renderDashboardList
+
+    renderDashboardList(type, items, containerId, icon, emptyMsg, ctaText, scrollTarget) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        console.log(`📊 Rendering ${type} list:`, items);
+
+        if (!items || items.length === 0) {
+            container.innerHTML = `
+                <div class="bg-card-light dark:bg-card-dark border border-dashed border-slate-300 dark:border-emerald-900/50 rounded-2xl p-8 flex flex-col items-center justify-center text-center">
+                    <div class="w-12 h-12 rounded-full bg-slate-100 dark:bg-emerald-950/50 flex items-center justify-center mb-3">
+                        <span class="material-icons-round text-slate-400 dark:text-emerald-800">${icon}</span>
+                    </div>
+                    <p class="text-sm font-medium text-slate-500 dark:text-emerald-700/70">${emptyMsg}</p>
+                    <button class="mt-3 text-xs font-bold text-primary px-4 py-2 rounded-full bg-emerald-50 dark:bg-emerald-950/40" onclick="window.app.scrollToSection('${scrollTarget}'); window.app.closeModal();">${ctaText}</button>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = items.slice(0, 3).map(item => {
+            let title = '';
+            let subtitle = '';
+            let status = 'Active';
+            
+            if (type === 'missions') {
+                // Handle mission_registrations with nested missions data
+                if (item.missions) {
+                    title = item.missions.title || 'Mission';
+                    // Format the date nicely
+                    const missionDate = item.missions.date 
+                        ? new Date(item.missions.date).toLocaleDateString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            year: 'numeric'
+                        })
+                        : '';
+                    subtitle = item.missions.location 
+                        ? `${item.missions.location}${missionDate ? ' • ' + missionDate : ''}`
+                        : missionDate || new Date(item.created_at).toLocaleDateString();
+                    status = 'Joined';
+                } else {
+                    title = item.title || 'Mission';
+                    subtitle = item.location || new Date(item.created_at).toLocaleDateString();
+                    status = 'Joined';
+                }
+            } else if (type === 'reports') {
+                title = item.location || 'Report';
+                subtitle = item.description ? item.description.substring(0, 30) + '...' : new Date(item.created_at).toLocaleDateString();
+                status = item.status || 'Pending';
+            } else if (type === 'sightings') {
+                title = item.species_name || 'Sighting';
+                subtitle = item.location || new Date(item.created_at).toLocaleDateString();
+                status = 'Reported';
+            } else if (type === 'stories') {
+                title = item.title || 'Story';
+                subtitle = new Date(item.created_at).toLocaleDateString();
+                status = 'Published';
+            }
+
+            const statusColor = status === 'Joined' || status === 'Reported' || status === 'Published' 
+                ? 'bg-emerald-100 text-emerald-600' 
+                : 'bg-slate-100 text-slate-500';
+
+            return `
+                <div class="bg-card-light dark:bg-card-dark p-4 rounded-2xl border border-slate-100 dark:border-emerald-900/30 shadow-sm flex items-center justify-between">
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <div class="w-10 h-10 rounded-xl bg-slate-50 dark:bg-emerald-950/30 flex items-center justify-center flex-shrink-0">
+                            <span class="material-icons-round text-slate-400 dark:text-emerald-800 text-xl">${icon}</span>
+                        </div>
+                        <div class="overflow-hidden">
+                            <h4 class="text-sm font-bold text-slate-900 dark:text-white truncate">${this.escapeHtml(title)}</h4>
+                            <p class="text-xs text-slate-500 dark:text-emerald-700/70 truncate">${this.escapeHtml(subtitle)}</p>
+                        </div>
+                    </div>
+                    <span class="text-[10px] font-bold px-2 py-1 rounded-md ${statusColor} uppercase tracking-wider">${status}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
     async fetchNotifications() {
         try {
             const listEl = document.getElementById('dashboardAlertsList');
-            const res = await fetch(`${API_BASE}/api/notifications`, {
-                headers: this.auth.getAuthHeader()
-            });
+            const res = await this.auth.apiFetch('/api/notifications');
             const data = await res.json();
             
             if (res.ok) {
@@ -1460,9 +1612,7 @@ class GoaEcoGuard {
 
     async checkNotifications() {
         try {
-            const res = await fetch(`${API_BASE}/api/notifications`, {
-                headers: this.auth.getAuthHeader()
-            });
+            const res = await this.auth.apiFetch('/api/notifications');
             const data = await res.json();
             if (res.ok) {
                 const unread = data.filter(n => !n.is_read);
@@ -1485,9 +1635,8 @@ class GoaEcoGuard {
 
     async markNotificationsRead() {
         try {
-            const res = await fetch(`${API_BASE}/api/notifications/read`, {
-                method: 'POST',
-                headers: this.auth.getAuthHeader()
+            const res = await this.auth.apiFetch('/api/notifications/read', {
+                method: 'POST'
             });
             if (res.ok) {
                 this.fetchNotifications();
@@ -1563,6 +1712,8 @@ class GoaEcoGuard {
         }
     }
 
+// In script.js - update switchFeed method
+
     switchFeed(feedType) {
         // Toggle active tab UI
         document.querySelectorAll('.feed-tab').forEach(tab => {
@@ -1574,11 +1725,15 @@ class GoaEcoGuard {
             content.classList.toggle('active', content.id === `${feedType}Feed`);
         });
 
-        // Refresh dynamic content if needed
-        if (feedType === 'stories' && window.loadStories) window.loadStories();
-        if (feedType === 'sightings' && window.loadSightings) window.loadSightings();
+        // Refresh dynamic content when tabs are clicked
+        if (feedType === 'stories' && window.loadStories) {
+            window.loadStories('feed'); // Only update feed tab
+        }
+        
+        if (feedType === 'sightings' && window.loadSightings) {
+            window.loadSightings('feed'); // Only update feed tab
+        }
     }
-
     async openUserProfile(userId) {
         if (!userId) return;
         
@@ -2115,13 +2270,14 @@ class GoaEcoGuard {
         if (!container || !this.missions) return;
 
         const TRUNCATE = 120;
+        const joinedMissions = getJoinedMissions(); // Get joined missions from localStorage
 
         container.innerHTML = this.missions.length
             ? this.missions.map(m => {
-                const joined = getJoinedMissions().includes(String(m.id));
+                const joined = joinedMissions.includes(String(m.id)); // Check if joined
 
                 const joinBtn = joined
-                    ? `<button class="btn btn-joined" disabled>&#10003; Already Joined</button>`
+                    ? `<button class="btn btn-joined" disabled>✅ Joined</button>`
                     : `<button class="btn btn-primary join-mission-btn" data-mission-id="${m.id}">Join Mission</button>`;
 
                 const desc = m.description || '';
@@ -2130,18 +2286,18 @@ class GoaEcoGuard {
 
                 const descBlock = long
                     ? `<div class="mission-desc">
-                         <p class="mission-desc-short">${short}</p>
-                         <p class="mission-desc-full" style="display:none;margin:0">${desc}</p>
-                         <button class="read-more-btn" onclick="(function(b){
-                           var w=b.closest('.mission-desc');
-                           var s=w.querySelector('.mission-desc-short');
-                           var f=w.querySelector('.mission-desc-full');
-                           var o=f.style.display!='none';
-                           s.style.display=o?'':'none';
-                           f.style.display=o?'none':'';
-                           b.textContent=o?'Read more':'Show less';
-                         })(this)">Read more</button>
-                       </div>`
+                        <p class="mission-desc-short">${short}</p>
+                        <p class="mission-desc-full" style="display:none;margin:0">${desc}</p>
+                        <button class="read-more-btn" onclick="(function(b){
+                        var w=b.closest('.mission-desc');
+                        var s=w.querySelector('.mission-desc-short');
+                        var f=w.querySelector('.mission-desc-full');
+                        var o=f.style.display!='none';
+                        s.style.display=o?'':'none';
+                        f.style.display=o?'none':'';
+                        b.textContent=o?'Read more':'Show less';
+                        })(this)">Read more</button>
+                    </div>`
                     : `<div class="mission-desc"><p class="mission-desc-short">${desc}</p></div>`;
 
                 return `
@@ -2165,10 +2321,35 @@ class GoaEcoGuard {
             }).join('')
             : `<p class="text-center">No missions available yet.</p>`;
     }
+// In script.js - update these methods
 
     openMissionModal(missionId) {
         const mission = this.missions?.find(m => m.id == missionId);
         if (!mission) return;
+
+        // Check if user is already logged in and has already joined
+        if (!this.auth.isAuthenticated()) {
+            window.location.href = 'login/login.html';
+            return;
+        }
+
+        // Check if already joined using localStorage
+        const joinedMissions = getJoinedMissions();
+        if (joinedMissions.includes(String(missionId))) {
+            this.showToast('You have already joined this mission! ✅', 'info');
+            
+            // Optionally show a different modal or just close
+            const modal = document.getElementById('missionModal');
+            if (modal) {
+                modal.classList.remove('active');
+                modal.classList.add('closing');
+                setTimeout(() => {
+                    modal.classList.remove('closing');
+                    modal.style.display = 'none';
+                }, 250);
+            }
+            return;
+        }
 
         document.getElementById('modalTitle').textContent = 'Join Mission';
         document.getElementById('modalMissionTitle').textContent = mission.title;
@@ -2184,6 +2365,16 @@ class GoaEcoGuard {
     }
 
     showJoinForm(missionId) {
+        // Double-check again before showing the form
+        const joinedMissions = getJoinedMissions();
+        if (joinedMissions.includes(String(missionId))) {
+            this.showToast('You have already joined this mission! ✅', 'info');
+            
+            // Close the mission modal
+            document.getElementById('missionModal')?.classList.remove('active');
+            return;
+        }
+
         document.getElementById('missionModal').classList.remove('active');
         const joinModal = document.getElementById('joinModal');
         joinModal.classList.remove('hidden');
@@ -2191,32 +2382,37 @@ class GoaEcoGuard {
         document.getElementById('joinForm').dataset.missionId = missionId;
     }
 
+// In script.js - replace handleJoinMission method
+
+// In script.js - update handleJoinMission method
+
     async handleJoinMission(e) {
         e.preventDefault();
         const form = e.target.closest('form');
         const missionId = form.dataset.missionId;
-        const name = document.getElementById('joinName').value;
-        const email = document.getElementById('joinEmail').value;
-        const phone = document.getElementById('joinPhone').value;
+        const name = document.getElementById('joinName').value.trim();
+        const email = document.getElementById('joinEmail').value.trim().toLowerCase();
+        const phone = document.getElementById('joinPhone').value.trim();
 
         if (!missionId) {
             this.showToast('Mission ID is missing', 'error');
-            console.error('Mission ID missing from form dataset');
             return;
         }
 
-        console.log('Attempting to join mission:', {
-            mission_id: missionId,
-            name,
-            email,
-            phone: phone || 'not provided',
-            api_url: `${API_BASE}/api/join`
-        });
+        // Check localStorage first
+        const joinedMissions = getJoinedMissions();
+        if (joinedMissions.includes(String(missionId))) {
+            this.showToast('You have already joined this mission! ✅', 'info');
+            
+            const joinModal = document.getElementById('joinModal');
+            if (joinModal) {
+                joinModal.classList.remove('active');
+                joinModal.classList.add('hidden');
+            }
+            return;
+        }
 
         try {
-            // Test connection first
-            console.log('Testing connection to:', API_BASE);
-
             const res = await fetch(`${API_BASE}/api/join`, {
                 method: 'POST',
                 headers: {
@@ -2225,32 +2421,41 @@ class GoaEcoGuard {
                 },
                 body: JSON.stringify({
                     mission_id: missionId,
-                    name: name.trim(),
-                    email: email.trim().toLowerCase(),
-                    phone: phone ? phone.trim() : null
-                }),
-                mode: 'cors'  // Explicitly set CORS mode
+                    name,
+                    email,
+                    phone: phone || null
+                })
             });
 
-            console.log('Response status:', res.status);
+            const data = await res.json();
 
             if (!res.ok) {
-                let errorMsg = `HTTP ${res.status}`;
-                try {
-                    const errorData = await res.json();
-                    errorMsg = errorData.error || errorMsg;
-                } catch (parseError) {
-                    // Couldn't parse JSON error response
-                    const text = await res.text();
-                    errorMsg = text || errorMsg;
+                if (data.code === '23505' || data.error?.includes('duplicate')) {
+                    console.log('User already registered for this mission');
+                    markMissionJoined(missionId);
+                    this.showToast('You have already joined this mission! ✅', 'info');
+                    
+                    const joinModal = document.getElementById('joinModal');
+                    if (joinModal) {
+                        joinModal.classList.remove('active');
+                        joinModal.classList.add('hidden');
+                    }
+                    
+                    this.loadMissions();
+                    
+                    // ✅ Refresh profile stats if modal is open
+                    const settingsModal = document.getElementById('settingsModal');
+                    if (settingsModal && settingsModal.classList.contains('active')) {
+                        setTimeout(() => this.fetchProfileStats(), 500);
+                    }
+                    return;
                 }
-                throw new Error(errorMsg);
+                throw new Error(data.error || `Failed to join mission (${res.status})`);
             }
 
-            const data = await res.json();
             console.log('Join mission success:', data);
 
-            // Persist joined state in localStorage (survives logout & browser close)
+            // Persist joined state
             markMissionJoined(missionId);
 
             this.showToast('Successfully joined the mission! A confirmation email has been sent to you. 🌿', 'success');
@@ -2265,43 +2470,20 @@ class GoaEcoGuard {
             // Reset form
             if (form) form.reset();
 
-            // Re-render missions so the button flips to "Already Joined"
-            if (typeof this.loadMissions === 'function') {
-                this.loadMissions();
+            // Re-render missions
+            this.loadMissions();
+            
+            // ✅ Refresh profile stats if modal is open
+            const settingsModal = document.getElementById('settingsModal');
+            if (settingsModal && settingsModal.classList.contains('active')) {
+                setTimeout(() => this.fetchProfileStats(), 500);
             }
 
         } catch (err) {
-            console.error('Join mission error details:', err);
-
-            // Provide more specific error messages
-            let userMessage = err.message;
-
-            if (err.name === 'TypeError' && err.message.includes('fetch')) {
-                userMessage = `Cannot connect to server. Please ensure:
-                1. Backend server is running (node server.js)
-                2. Port 3000 is accessible
-                3. No firewall blocking the connection`;
-            } else if (err.message.includes('NetworkError')) {
-                userMessage = 'Network error. Check your internet connection.';
-            } else if (err.message.includes('CORS')) {
-                userMessage = 'CORS error. Server may not be properly configured.';
-            }
-
-            this.showToast(userMessage, 'error');
-
-            // Show debug info in console
-            console.log('Debug info:');
-            console.log('- API_BASE:', API_BASE);
-            console.log('- Full URL:', `${API_BASE}/api/join`);
-            console.log('- Request body:', {
-                mission_id: missionId,
-                name,
-                email,
-                phone
-            });
+            console.error('Join mission error:', err);
+            this.showToast(err.message || 'Failed to join mission', 'error');
         }
     }
-
     /* ---------- LEADERBOARD ---------- */
     async loadLeaderboard() {
         this.leaderboard = await this.fetchJSON('/api/leaderboard');
@@ -2823,6 +3005,9 @@ class GoaEcoGuard {
 
     closeModal() {
         document.querySelectorAll('.modal').forEach(m => {
+            // Don't close if it's already closing or hidden
+            if (m.classList.contains('closing') || m.classList.contains('hidden')) return;
+            
             m.classList.remove('active');
             m.classList.add('closing');
             setTimeout(() => {
